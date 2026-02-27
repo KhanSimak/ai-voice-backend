@@ -1,12 +1,10 @@
 fastapi
 uvicorn
-python-dotenv
 sqlalchemy
 psycopg2-binary
+python-dotenv
 python-jose
-langchain
-langchain-openai
+langchain==0.0.352
+langchain-community==0.0.20
 openai
 chromadb
-langchain-community
-langchain-core
