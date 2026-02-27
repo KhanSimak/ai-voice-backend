@@ -4,6 +4,7 @@ sqlalchemy
 psycopg2-binary
 python-dotenv
 python-jose
+pydantic==1.10.13
 langchain==0.0.352
 langchain-community==0.0.20
 openai
