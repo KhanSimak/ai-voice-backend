@@ -8,3 +8,5 @@ langchain
 langchain-openai
 openai
 chromadb
+langchain-community
+langchain-core
