@@ -3,7 +3,7 @@ load_dotenv()
 from langchain_community.vectorstores import Chroma
 
 from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.chains import ConversationalRetrievalChain
+from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
 from langchain.memory import ConversationBufferMemory
 from langchain.prompts import PromptTemplate
 import os
@@ -97,5 +97,7 @@ def ask_clinic_bot(phone_number: str, query: str):
     save_message(phone_number, "assistant", answer)
 
     return answer
-response = llm.invoke("Say hello")
-print(response.content)
+
+
+
+
