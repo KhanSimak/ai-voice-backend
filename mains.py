@@ -22,7 +22,23 @@ from auth import verify_token
 
 app = FastAPI()
 
+@app.post("/retell-webhook")
+async def retell_webhook(request: Request):
+    data = await request.json()
 
+    print("Incoming from Retell:", data)
+
+    event = data.get("event")
+
+    if event == "response_required":
+        user_message = data["data"]["transcript"]
+
+        # For now just test reply
+        return {
+            "response": f"You said: {user_message}"
+        }
+
+    return {"status": "ok"}
 # Create tables
 Base.metadata.create_all(bind=engine)
 
@@ -176,20 +192,3 @@ def get_chat(phone_number: str):
 
 app.include_router(admin_router)
 
-@app.post("/retell-webhook")
-async def retell_webhook(request: Request):
-    data = await request.json()
-
-    print("Incoming from Retell:", data)
-
-    event = data.get("event")
-
-    if event == "response_required":
-        user_message = data["data"]["transcript"]
-
-        # For now just test reply
-        return {
-            "response": f"You said: {user_message}"
-        }
-
-    return {"status": "ok"}
