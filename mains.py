@@ -175,3 +175,12 @@ def get_chat(phone_number: str):
 
 
 app.include_router(admin_router)
+
+@app.post("/retell-webhook")
+async def retell_webhook(request: Request):
+    data = await request.json()
+    print("Incoming from Retell:", data)
+
+    return {
+        "response": "Hello, how can I help you today?"
+    }
