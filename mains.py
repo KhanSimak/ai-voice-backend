@@ -179,8 +179,17 @@ app.include_router(admin_router)
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
     data = await request.json()
+
     print("Incoming from Retell:", data)
 
-    return {
-        "response": "Hello, how can I help you today?"
-    }
+    event = data.get("event")
+
+    if event == "response_required":
+        user_message = data["data"]["transcript"]
+
+        # For now just test reply
+        return {
+            "response": f"You said: {user_message}"
+        }
+
+    return {"status": "ok"}
