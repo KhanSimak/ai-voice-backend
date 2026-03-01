@@ -13,3 +13,8 @@ openai
 chromadb
 python-multipart
 pypdf
+sentence-transformers
+transformers
+torch
+pypdf
+faiss-cpu
