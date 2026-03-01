@@ -13,8 +13,11 @@ openai
 chromadb
 python-multipart
 pypdf
+langchain==0.1.20
+langchain-community
+langchain-groq
 sentence-transformers
-transformers
-torch
-pypdf
 faiss-cpu
+torch --index-url https://download.pytorch.org/whl/cpu
+pypdf
+python-dotenv

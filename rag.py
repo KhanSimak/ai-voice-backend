@@ -1,18 +1,28 @@
 from langchain.chains import RetrievalQA
-from langchain.vectorstores import FAISS
-from langchain.chat_models import ChatOpenAI
+
 from pythonembedded import load_embeddings
+from langchain_groq import ChatGroq
+from dotenv import load_dotenv
+import os
+from langchain_community.vectorstores import FAISS
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_groq import ChatGroq
 
 
 
+from langchain_community.embeddings import HuggingFaceEmbeddings
 
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
+)
 # -----------------------------
 # Load embeddings
 # -----------------------------
-embeddings = load_embeddings()
-llm = ChatOpenAI(
-    model_name="gpt-4o-mini",  # or gpt-4
-    temperature=0
+load_dotenv()
+
+llm = ChatGroq(
+    model_name="llama-3.3-70b-versatile",
+    groq_api_key=os.getenv("GROQ_API_KEY")
 )
 # -----------------------------
 # Load FAISS index (prebuilt)

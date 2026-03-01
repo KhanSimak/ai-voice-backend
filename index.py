@@ -1,27 +1,18 @@
-# create_index.py
-from langchain.vectorstores import FAISS
-from langchain.document_loaders import PyPDFLoader
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from pythonembedded import load_embeddings
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_community.vectorstores import FAISS
 
-# 1️⃣ Load PDF
-loader = PyPDFLoader("Clinic_Base.pdf")  # put your PDF path here
+# 1. Load PDF
+loader = PyPDFLoader("Clinic_Base.pdf")
 documents = loader.load()
 
-# 2️⃣ Split into chunks
-splitter = RecursiveCharacterTextSplitter(
-    chunk_size=500,      # each chunk ~500 chars
-    chunk_overlap=50     # overlap 50 chars between chunks
+# 2. Create embeddings
+embeddings = HuggingFaceEmbeddings(
+    model_name="sentence-transformers/all-MiniLM-L6-v2"
 )
-docs = splitter.split_documents(documents)
 
-# 3️⃣ Load embeddings model
-embeddings = load_embeddings()
-
-# 4️⃣ Create FAISS index
-vectorstore = FAISS.from_documents(docs, embeddings)
-
-# 5️⃣ Save FAISS index to disk
+# 3. Create vector store
+vectorstore = FAISS.from_documents(documents, embeddings)
 vectorstore.save_local("faiss_index")
 
-print("✅ FAISS index created successfully!")
+print("Index created successfully ✅")

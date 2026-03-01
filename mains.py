@@ -7,6 +7,12 @@ from models import Base, Appointment, Conversation
 from memry import save_message, load_memory
 from rag import ask_rag
 from datetime import datetime
+from langchain_openai import ChatOpenAI
+from langchain_openai import OpenAIEmbeddings
+from langchain_community.vectorstores import FAISS
+from langchain.chains import RetrievalQA
+
+
 
 # Initialize app
 app = FastAPI()
@@ -60,6 +66,28 @@ def conversation_engine(user_id: str, message: str):
 # -----------------------------# -----------------------------
 # RETELL WEBHOOK
 # -----------------------------
+
+
+embeddings = OpenAIEmbeddings()
+
+vectorstore = FAISS.load_local(
+    "faiss_index",
+    embeddings,
+    allow_dangerous_deserialization=True
+)
+
+llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
+
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=vectorstore.as_retriever()
+)
+
+def ask_rag(question: str):
+    result = qa_chain.invoke({"query": question})
+    return result["result"]
+
+
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
     try:
