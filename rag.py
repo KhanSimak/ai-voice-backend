@@ -1,103 +1,80 @@
-from dotenv import load_dotenv
-load_dotenv()
-from langchain_community.vectorstores import Chroma
-
-from langchain_openai import ChatOpenAI, OpenAIEmbeddings
-from langchain.chains.conversational_retrieval.base import ConversationalRetrievalChain
-from langchain.memory import ConversationBufferMemory
-from langchain.prompts import PromptTemplate
-import os
-from memry import save_message, load_memory
-from langchain_openai import ChatOpenAI
+from langchain.chains import RetrievalQA
+from langchain.vectorstores import FAISS
+from langchain.chat_models import ChatOpenAI
+from pythonembedded import load_embeddings
 
 
-# OpenRouter config
-os.environ["OPENAI_API_BASE"] = "https://openrouter.ai/api/v1"
 
-# Embeddings
-embedding = OpenAIEmbeddings(model="text-embedding-3-small")
 
-# Load vector DB
-vectorstore = Chroma(
-    persist_directory="./clinic_vector_db",
-    embedding_function=embedding,
-    collection_name="clinic"
+# -----------------------------
+# Load embeddings
+# -----------------------------
+embeddings = load_embeddings()
+llm = ChatOpenAI(
+    model_name="gpt-4o-mini",  # or gpt-4
+    temperature=0
+)
+# -----------------------------
+# Load FAISS index (prebuilt)
+# -----------------------------
+vectorstore = FAISS.load_local(
+    "faiss_index",  # folder created by create_index.py
+    embeddings,
+    allow_dangerous_deserialization=True
+)
+retriever = vectorstore.as_retriever(search_kwargs={"k": 3})  # top 3 doc
+
+qa_chain = RetrievalQA.from_chain_type(
+    llm=llm,
+    retriever=vectorstore.as_retriever()
 )
 
-retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+def ask_rag(question: str):
+    result = qa_chain.invoke({"query": question})
+    return result["result"]
 
-# Conversation Memory
-memory = ConversationBufferMemory(
-    memory_key="chat_history",
-    return_messages=True
-)
+# -----------------------------
+# LLM setup (OpenAI)
+# -----------------------------
 
-# System Prompt (Hallucination Control)
-template = """
-You are an AI assistant for Green Valley Clinic.
 
-Rules:
-- Answer ONLY from the provided clinic context.
-- If answer is not in the context, say:
-  "I’m sorry, I don’t have that information available."
-- Do NOT guess or create information.
-- Keep answers professional and short.
+# -----------------------------
+# RAG function
+# -----------------------------
+def ask_rag(question: str):
+    # Step 1: Retrieve documents
+    docs = retriever.get_relevant_documents(question)
+
+    # Step 2: Debug - check retrieved docs
+    print("===== Retrieved Docs =====")
+    if not docs:
+        print("No relevant documents found.")
+    for i, doc in enumerate(docs):
+        print(f"Doc {i+1}:", doc.page_content[:300])  # first 300 chars
+        print("------------------------")
+
+    # Step 3: If no docs retrieved
+    if not docs:
+        return "I do not have that information."
+
+    # Step 4: Combine retrieved docs into context
+    context = "\n\n".join([doc.page_content for doc in docs])
+
+    # Step 5: Strict prompt for LLM
+    prompt = f"""
+You are a strict assistant.
+Answer ONLY using the context below.
+If answer is not in the context, say "I do not have that information."
 
 Context:
 {context}
 
 Question:
 {question}
-
-Answer:
 """
 
-QA_PROMPT = PromptTemplate(
-    template=template,
-    input_variables=["context", "question"]
-)
+    # Step 6: Call LLM
+    response = llm.invoke(prompt)
 
-# LLM
-llm = ChatOpenAI(
-    model="openai/gpt-4o-mini",
-    temperature=0,
-    base_url=os.getenv("OPENAI_API_BASE")
-)
-
-# Conversational RAG Chain
-qa_chain = ConversationalRetrievalChain.from_llm(
-    llm=llm,
-    retriever=retriever,
-    memory=memory,
-    combine_docs_chain_kwargs={"prompt": QA_PROMPT}
-)
-
-
-def ask_clinic_bot(phone_number: str, query: str):
-
-    # Load previous memory from DB
-    past_messages = load_memory(phone_number)
-
-    chat_history = []
-    for msg in past_messages:
-        if msg.role == "user":
-            chat_history.append(("human", msg.message))
-        else:
-            chat_history.append(("ai", msg.message))
-
-    result = qa_chain.invoke({
-        "question": query,
-        "chat_history": chat_history
-    })
-
-    answer = result["answer"]
-
-    # Save current interaction
-    save_message(phone_number, "user", query)
-    save_message(phone_number, "assistant", answer)
-
-    return answer
-
-
-
-
+    # Step 7: Return answer
+    return response.content

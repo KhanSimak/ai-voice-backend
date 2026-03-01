@@ -5,7 +5,7 @@ from sqlalchemy.orm import Session
 from database import SessionLocal, engine
 from models import Base, Appointment, Conversation
 from memry import save_message, load_memory
-from rag import ask_clinic_bot
+from rag import ask_rag
 from datetime import datetime
 
 # Initialize app
@@ -23,7 +23,13 @@ def get_db():
         yield db
     finally:
         db.close()
+class AskRequest(BaseModel):
+    question: str
 
+@app.post("/ask")
+async def ask_question(payload: AskRequest):
+    answer = ask_rag(payload.question)
+    return {"answer": answer}
 # -----------------------------
 # Conversation engine
 # -----------------------------
