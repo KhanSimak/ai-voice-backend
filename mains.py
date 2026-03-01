@@ -51,18 +51,74 @@ def conversation_engine(user_id: str, message: str):
 
 # -----------------------------
 # Retell Webhook
+# -----------------------------# -----------------------------
+# RETELL WEBHOOK
 # -----------------------------
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
     data = await request.json()
+
+    # Retell usually sends call_id + transcript
     user_id = data.get("call_id")
     message = data.get("transcript")
 
-    # 1️⃣ Save user message
+    if not user_id or not message:
+        return {"response": "Sorry, I didn't receive your message properly."}
+
+    # 1️⃣ Save user message in memory
     save_message(user_id, role="user", message=message)
 
-    # 2️⃣ Try conversation engine
-    response = conversation_engine(user_id, message)
+    # 2️⃣ Check conversation state
+    db = SessionLocal()
+    convo = db.query(Conversation).filter_by(user_id=user_id).first()
+
+    if not convo:
+        convo = Conversation(user_id=user_id, state="greeting")
+        db.add(convo)
+        db.commit()
+
+    # -----------------------------
+    # Conversation Flow
+    # -----------------------------
+
+    if convo.state == "greeting":
+        convo.state = "collecting_name"
+        db.commit()
+        db.close()
+        reply = "Hello! May I know your name?"
+
+    elif convo.state == "collecting_name":
+        convo.name = message
+        convo.state = "normal"
+        db.commit()
+        db.close()
+        reply = f"Nice to meet you {message}. How can I help you today?"
+
+    else:
+        db.close()
+
+        # 3️⃣ Load memory for better context
+        history = load_memory(user_id, limit=10)
+        context = "\n".join(
+            [f"{h['role']}: {h['message']}" for h in history]
+        )
+
+        full_prompt = f"""
+        Previous conversation:
+        {context}
+
+        User question:
+        {message}
+        """
+
+        # 4️⃣ Call RAG
+        reply = ask_clinic_bot(full_prompt)
+
+    # 5️⃣ Save bot reply
+    save_message(user_id, role="bot", message=reply)
+
+    # 6️⃣ Return response to Retell
+    return {"response": reply}
 
     # 3️⃣ If conversation complete, fallback to RAG + memory
     if not response:
