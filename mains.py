@@ -11,6 +11,7 @@ from langchain_openai import ChatOpenAI
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain.chains import RetrievalQA
+import uvicorn
 
 
 
@@ -152,3 +153,8 @@ def check_db():
             return {"database": "Connected successfully ✅"}
     except Exception as e:
         return {"database": "Connection failed ❌", "error": str(e)}
+        
+
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", 10000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
