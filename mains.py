@@ -1,160 +1,104 @@
-# main.py
-from fastapi import FastAPI, Request, Depends
+import os
+import logging
+
+from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from sqlalchemy.orm import Session
-from database import SessionLocal, engine
-from models import Base, Appointment, Conversation
-from memry import save_message, load_memory
-from rag import ask_rag
-from datetime import datetime
-from langchain_openai import ChatOpenAI
-from langchain_openai import OpenAIEmbeddings
-from langchain_community.vectorstores import FAISS
-from langchain.chains import RetrievalQA
-import uvicorn
+from contextlib import asynccontextmanager
+
+from rag import create_vectorstore, get_llm, ask_question
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 
-
-# Initialize app
-app = FastAPI()
-
-# Create tables
-Base.metadata.create_all(bind=engine)
-
-# -----------------------------
-# DB session dependency
-# -----------------------------
-def get_db():
-    db = SessionLocal()
+# ── Lifespan (replaces deprecated @app.on_event) ──────────────────────────────
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Initialize vectorstore and LLM once at startup."""
+    logger.info("Initializing vectorstore and LLM...")
     try:
-        yield db
-    finally:
-        db.close()
-class AskRequest(BaseModel):
+        app.state.vectorstore = create_vectorstore()
+        app.state.llm = get_llm()
+        logger.info("Vectorstore and LLM ready.")
+    except Exception as e:
+        logger.error(f"Startup failed: {e}")
+        raise
+    yield
+    logger.info("Shutting down.")
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
+app = FastAPI(
+    title="GreenValley Clinic RAG API",
+    description="Ask questions about GreenValley Clinic using a PDF knowledge base.",
+    version="1.0.0",
+    lifespan=lifespan,
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+
+# ── Request / Response Models ──────────────────────────────────────────────────
+class QuestionRequest(BaseModel):
     question: str
 
-@app.post("/ask")
-async def ask_question(payload: AskRequest):
-    answer = ask_rag(payload.question)
-    return {"answer": answer}
-# -----------------------------
-# Conversation engine
-# -----------------------------
-def conversation_engine(user_id: str, message: str):
-    db = SessionLocal()
-    convo = db.query(Conversation).filter_by(user_id=user_id).first()
-    
-    if not convo:
-        convo = Conversation(user_id=user_id, state="greeting")
-        db.add(convo)
-        db.commit()
 
-    if convo.state == "greeting":
-        convo.state = "collecting_name"
-        db.commit()
-        return "Hello! May I know your name?"
-
-    if convo.state == "collecting_name":
-        convo.name = message
-        convo.state = "collecting_purpose"
-        db.commit()
-        return "How can I help you today?"
-
-    return None  # conversation complete
-
-# -----------------------------
-# Retell Webhook
-# -----------------------------# -----------------------------
-# RETELL WEBHOOK
-# -----------------------------
+class AnswerResponse(BaseModel):
+    answer: str
 
 
-embeddings = OpenAIEmbeddings()
-
-vectorstore = FAISS.load_local(
-    "faiss_index",
-    embeddings,
-    allow_dangerous_deserialization=True
-)
-
-llm = ChatOpenAI(model="gpt-4o-mini", temperature=0)
-
-qa_chain = RetrievalQA.from_chain_type(
-    llm=llm,
-    retriever=vectorstore.as_retriever()
-)
-
-def ask_rag(question: str):
-    result = qa_chain.invoke({"query": question})
-    return result["result"]
-
-
-@app.post("/retell-webhook")
-async def retell_webhook(request: Request):
-    try:
-        data = await request.json()
-        print("Received:", data)
-        return {"status": "received", "data": data}
-    except Exception as e:
-        print("Error:", str(e))
-        return {"error": str(e)}
-# -----------------------------
-# Appointments endpoints
-# -----------------------------
-@app.get("/appointments")
-def get_appointments(db: Session = Depends(get_db)):
-    appointments = db.query(Appointment).all()
-    result = []
-    for a in appointments:
-        result.append({
-            "id": a.id,
-            "patient_name": a.patient_name,
-            "phone_number": a.phone_number,
-            "doctor_name": a.doctor_name,
-            "appointment_time": a.appointment_time.isoformat()
-        })
-    return result
-
-@app.post("/book-appointment")
-def book_appointment(
-    patient_name: str,
-    phone_number: str,
-    doctor_name: str,
-    appointment_time: str,
-    db: Session = Depends(get_db)
-):
-    dt = datetime.fromisoformat(appointment_time)
-    appointment = Appointment(
-        patient_name=patient_name,
-        phone_number=phone_number,
-        doctor_name=doctor_name,
-        appointment_time=dt
-    )
-    db.add(appointment)
-    db.commit()
-    db.refresh(appointment)
+# ── Endpoints ─────────────────────────────────────────────────────────────────
+@app.get("/")
+async def root():
     return {
-        "message": "Appointment booked successfully ✅",
-        "appointment_id": appointment.id
+        "status": "ok",
+        "service": "GreenValley Clinic RAG API",
+        "usage": "POST /ask with JSON body: {\"question\": \"your question here\"}",
     }
 
-# -----------------------------
-# Health check
-# -----------------------------
-@app.get("/")
-def home():
-    return {"message": "Server is running 🚀"}
 
-@app.get("/check-db")
-def check_db():
+@app.get("/health")
+async def health():
+    ready = (
+        hasattr(app.state, "vectorstore")
+        and app.state.vectorstore is not None
+        and hasattr(app.state, "llm")
+        and app.state.llm is not None
+    )
+    return {"status": "ready" if ready else "initializing"}
+
+
+@app.post("/ask", response_model=AnswerResponse)
+async def ask(body: QuestionRequest):
+    if not body.question or not body.question.strip():
+        raise HTTPException(status_code=400, detail="Question must not be empty.")
+
+    if not hasattr(app.state, "vectorstore") or app.state.vectorstore is None:
+        raise HTTPException(status_code=503, detail="Vectorstore not yet initialized. Please try again shortly.")
+
+    if not hasattr(app.state, "llm") or app.state.llm is None:
+        raise HTTPException(status_code=503, detail="LLM not yet initialized. Please try again shortly.")
+
     try:
-        with engine.connect() as connection:
-            connection.execute("SELECT 1")
-            return {"database": "Connected successfully ✅"}
+        answer = ask_question(app.state.vectorstore, app.state.llm, body.question)
+        return AnswerResponse(answer=answer)
     except Exception as e:
-        return {"database": "Connection failed ❌", "error": str(e)}
-        
+        logger.error(f"Error answering question: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Failed to generate answer: {str(e)}")
 
+
+# ── Entry Point ───────────────────────────────────────────────────────────────
 if __name__ == "__main__":
+    import uvicorn
     port = int(os.environ.get("PORT", 10000))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    uvicorn.run("mains:app", host="0.0.0.0", port=port, reload=False)
