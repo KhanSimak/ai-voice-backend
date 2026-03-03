@@ -10,10 +10,7 @@ from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, SystemMessage
 logger = logging.getLogger(__name__)
 
-genai.configure(api_key="AIzaSyC5nYoDUMXV7N1sUxOJ6eNf96Q2ka-zCwk") # Replace with your key
-for m in genai.list_models():
-    if 'embedContent' in m.supported_generation_methods:
-        print(m.name)
+
 def create_vectorstore():
     """
     Loads PDF, splits into chunks, embeds with Google Generative AI,
