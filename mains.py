@@ -2,6 +2,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from typing import Optional
+from fastapi import Request
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -170,60 +171,16 @@ async def ask(body: QuestionRequest):
 
 # ── New endpoint: /retell-webhook ─────────────────────────────────────────────
 
-@app.post("/retell-webhook", response_model=RetellResponse)
-async def retell_webhook(body: RetellRequest):
-    """
-    Retell POSTs here during every live call turn.
-    Uses the same FAISS RAG pipeline as /ask but voice-optimised.
-    """
-    logger.info(
-        f"Retell [{body.interaction_type}] | call_id={body.call_id} "
-        f"| turns={len(body.transcript)}"
-    )
+from fastapi import Request
 
-    # Return empty string for non-response interaction types
-    if body.interaction_type not in ("response_required", "reminder_required"):
-        return RetellResponse(response="")
+@app.post("/retell-webhook")
+async def retell_webhook(request: Request):
+    body = await request.json()
+    print("WEBHOOK BODY:", body)
 
-    # Graceful fallback if vectorstore not ready
-    if not hasattr(app.state, "vectorstore") or app.state.vectorstore is None:
-        return RetellResponse(
-            response="I'm just getting started. Please give me a moment and try again."
-        )
-
-    # Opening greeting when call starts with no transcript yet
-    if not body.transcript:
-        return RetellResponse(response="Hello! How can I help you today?")
-
-    # Find the most recent user message
-    latest_user_message = ""
-    for msg in reversed(body.transcript):
-        if msg.role == "user" and msg.content.strip():
-            latest_user_message = msg.content.strip()
-            break
-
-    if not latest_user_message:
-        return RetellResponse(response="I didn't catch that. Could you say that again?")
-
-    # History = everything except the last message (which we pass as the question)
-    history = body.transcript[:-1] if len(body.transcript) > 1 else []
-
-    try:
-        answer = ask_question_for_voice(
-            vectorstore=app.state.vectorstore,
-            llm=app.state.llm,
-            question=latest_user_message,
-            history=history,
-        )
-        logger.info(f"Response for call_id={body.call_id}: {answer[:100]}...")
-        return RetellResponse(response=answer)
-
-    except Exception as e:
-        logger.error(f"Error in /retell-webhook call_id={body.call_id}: {e}", exc_info=True)
-        return RetellResponse(
-            response="I'm sorry, I ran into a technical issue. Please try again or speak with our team."
-        )
-
+    return {
+        "response": "Hello from webhook"
+    }
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 

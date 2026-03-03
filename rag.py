@@ -21,7 +21,7 @@ def create_vectorstore():
         raise ValueError("GOOGLE_API_KEY environment variable is not set.")
     
 
-    pdf_path = os.path.join(os.path.dirname(__file__), "Clinic_base.pdf")
+    pdf_path = os.path.join(os.path.dirname(__file__), "Clinic_Base.pdf")
     if not os.path.exists(pdf_path):
         raise FileNotFoundError(f"PDF not found at: {pdf_path}")
 
