@@ -65,16 +65,6 @@ class AnswerResponse(BaseModel):
 
 # ── Schemas — Retell webhook ──────────────────────────────────────────────────
 
-class RetellMessage(BaseModel):
-    role: str        # "user" or "assistant"
-    content: str
-
-class RetellRequest(BaseModel):
-    call_id: str
-    interaction_type: str   # "response_required" | "reminder_required" | "call_details" | "ping_pong"
-    transcript: list[RetellMessage] = []
-    response_id: Optional[int] = None
-
 class RetellResponse(BaseModel):
     response: str
 
@@ -176,45 +166,30 @@ from fastapi import Request
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
     body = await request.json()
-    print("WEBHOOK BODY:", body)
+    call = body.get("call", {})
+    transcript = call.get("transcript_object", [])
 
-    interaction_type = body.get("interaction_type")
-    transcript = body.get("transcript", [])
-    call_id = body.get("call_id")
-
-    # Only respond when response is required
-    if interaction_type not in ["response_required", "reminder_required"]:
-        return {"response": ""}
-
-    # If no transcript yet (call just started)
-    if not transcript:
-        return {"response": "Hello! How can I help you today?"}
-
-    # Get latest user message
+    # Extract latest user message
     latest_user_message = ""
     for msg in reversed(transcript):
-        if msg["role"] == "user" and msg["content"].strip():
+        if msg.get("role") == "user" and msg.get("content", "").strip():
             latest_user_message = msg["content"].strip()
             break
 
     if not latest_user_message:
-        return {"response": "I didn't catch that. Could you repeat?"}
+        return {"response": "I didn't catch that. Could you repeat your question?"}
 
-    try:
-        answer = ask_question_for_voice(
-            vectorstore=app.state.vectorstore,
-            llm=app.state.llm,
-            question=latest_user_message,
-            history=transcript[:-1],
-        )
+    # History = everything except last user message
+    history = transcript[:-1] if len(transcript) > 1 else []
 
-        print(f"Answer for {call_id}: {answer}")
-        return {"response": answer}
+    answer = ask_question_for_voice(
+        vectorstore=app.state.vectorstore,
+        llm=app.state.llm,
+        question=latest_user_message,
+        history=history,
+    )
 
-    except Exception as e:
-        print("ERROR:", e)
-        return {"response": "Sorry, I ran into a technical issue."}
-
+    return {"response": answer}
 # ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
