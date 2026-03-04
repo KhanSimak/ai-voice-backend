@@ -84,6 +84,8 @@ def ask_question_for_voice(vectorstore, llm, question: str, history: list) -> st
         return "I didn't catch that. Could you please repeat your question?"
 
     docs = vectorstore.similarity_search(question, k=3)
+    print("QUESTION:", question)
+    print("DOCS FOUND:", len(docs))
 
     if docs:
         context = "\n\n".join(
@@ -151,6 +153,11 @@ async def health():
         and hasattr(app.state, "llm") and app.state.llm is not None
     )
     return {"status": "ready" if ready else "initializing"}
+@app.get("/debug")
+async def debug():
+    return {
+        "vectorstore_loaded": hasattr(app.state, "vectorstore") and app.state.vectorstore is not None
+    }
 
 @app.post("/ask", response_model=AnswerResponse)
 async def ask(body: QuestionRequest):
