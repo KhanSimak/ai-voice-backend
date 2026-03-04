@@ -78,6 +78,7 @@ def ask_question_for_voice(vectorstore, llm, question: str, history: list) -> st
     - No markdown or bullet points
     - Conversation history included for multi-turn context
     """
+
     question = question.strip()
     if not question:
         return "I didn't catch that. Could you please repeat your question?"
@@ -89,6 +90,7 @@ def ask_question_for_voice(vectorstore, llm, question: str, history: list) -> st
             f"[Page {doc.metadata.get('page', 'N/A')}]\n{doc.page_content.strip()}"
             for doc in docs
         )
+
         system_content = (
             "You are a helpful, friendly voice assistant answering questions about our services. "
             "You are speaking aloud on a phone call — keep answers SHORT (2-3 sentences max). "
@@ -109,21 +111,25 @@ def ask_question_for_voice(vectorstore, llm, question: str, history: list) -> st
 
     messages = [SystemMessage(content=system_content)]
 
-    # Include last 6 turns of conversation history for multi-turn awareness
+    # Include last 6 turns of conversation history
     for msg in history[-6:]:
-     role = msg.get("role", "")
-    content = msg.get("content", "")
-    if role == "user":
-        messages.append(HumanMessage(content=content))
-    elif role == "assistant":
-        messages.append(AIMessage(content=content))
+        role = msg.get("role", "")
+        content = msg.get("content", "")
 
+        if role == "user":
+            messages.append(HumanMessage(content=content))
+        elif role == "assistant":
+            messages.append(AIMessage(content=content))
+
+    # Add current user question
+    messages.append(HumanMessage(content=question))
 
     response = llm.invoke(messages)
+
     if hasattr(response, "content"):
         return response.content.strip()
-    return str(response).strip()
 
+    return str(response).strip()
 
 # ── Existing endpoint: /ask ───────────────────────────────────────────────────
 
@@ -162,25 +168,25 @@ async def ask(body: QuestionRequest):
 
 # ── New endpoint: /retell-webhook ─────────────────────────────────────────────
 
-from fastapi import Request
-
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
+
     body = await request.json()
     call = body.get("call", {})
     transcript = call.get("transcript_object", [])
 
-    # Extract latest user message
     latest_user_message = ""
+
+    # Find most recent user message
     for msg in reversed(transcript):
-         if msg.get("role") == "user" and msg.get("content", "").strip():
+        if msg.get("role") == "user" and msg.get("content", "").strip():
             latest_user_message = msg["content"].strip()
-         break
+            break
 
     if not latest_user_message:
         return {"response": "I didn't catch that. Could you repeat your question?"}
 
-    # History = everything except last user message
+    # History = everything before latest user message
     history = transcript[:-1] if len(transcript) > 1 else []
 
     answer = ask_question_for_voice(
@@ -190,8 +196,7 @@ async def retell_webhook(request: Request):
         history=history,
     )
 
-    return {"response": answer}
-# ── Entry point ───────────────────────────────────────────────────────────────
+    return {"response": answer}# ── Entry point ───────────────────────────────────────────────────────────────
 
 if __name__ == "__main__":
     import uvicorn
