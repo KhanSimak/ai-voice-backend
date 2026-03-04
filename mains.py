@@ -94,15 +94,15 @@ def ask_question_for_voice(vectorstore, llm, question: str, history: list) -> st
         )
 
         system_content = (
-            "You are a helpful, friendly voice assistant answering questions about our services. "
-            "You are speaking aloud on a phone call — keep answers SHORT (2-3 sentences max). "
-            "Do NOT use bullet points, numbered lists, markdown, or special characters. "
-            "Speak naturally and conversationally. "
-            "Answer using ONLY the context below. "
-            "If the context does not contain the answer, say: "
-            "'I don't have that information right now, but our team can help you with that.' "
-            f"\n\nCONTEXT FROM KNOWLEDGE BASE:\n{context}"
-        )
+    "You are a helpful, friendly voice assistant for our clinic. "
+    "You are speaking on a phone call, so keep responses short and natural, 2 to 3 sentences maximum. "
+    "Use the information from the knowledge base below to answer the caller’s question clearly. "
+    "Be specific when possible, such as naming doctors, services, or availability. "
+    "Do not mention the knowledge base or say you are reading from context. "
+    "If the information truly is not available, say you can connect them with the team."
+
+    f"\n\nKNOWLEDGE BASE:\n{context}"
+)
     else:
         system_content = (
             "You are a helpful, friendly voice assistant. "
