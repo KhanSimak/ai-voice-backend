@@ -178,9 +178,42 @@ async def retell_webhook(request: Request):
     body = await request.json()
     print("WEBHOOK BODY:", body)
 
-    return {
-        "response": "Hello from webhook"
-    }
+    interaction_type = body.get("interaction_type")
+    transcript = body.get("transcript", [])
+    call_id = body.get("call_id")
+
+    # Only respond when response is required
+    if interaction_type not in ["response_required", "reminder_required"]:
+        return {"response": ""}
+
+    # If no transcript yet (call just started)
+    if not transcript:
+        return {"response": "Hello! How can I help you today?"}
+
+    # Get latest user message
+    latest_user_message = ""
+    for msg in reversed(transcript):
+        if msg["role"] == "user" and msg["content"].strip():
+            latest_user_message = msg["content"].strip()
+            break
+
+    if not latest_user_message:
+        return {"response": "I didn't catch that. Could you repeat?"}
+
+    try:
+        answer = ask_question_for_voice(
+            vectorstore=app.state.vectorstore,
+            llm=app.state.llm,
+            question=latest_user_message,
+            history=transcript[:-1],
+        )
+
+        print(f"Answer for {call_id}: {answer}")
+        return {"response": answer}
+
+    except Exception as e:
+        print("ERROR:", e)
+        return {"response": "Sorry, I ran into a technical issue."}
 
 # ── Entry point ───────────────────────────────────────────────────────────────
 
