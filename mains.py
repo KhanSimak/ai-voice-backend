@@ -111,12 +111,13 @@ def ask_question_for_voice(vectorstore, llm, question: str, history: list) -> st
 
     # Include last 6 turns of conversation history for multi-turn awareness
     for msg in history[-6:]:
-        if msg.role == "user":
-            messages.append(HumanMessage(content=msg.content))
-        elif msg.role == "assistant":
-            messages.append(AIMessage(content=msg.content))
+     role = msg.get("role", "")
+    content = msg.get("content", "")
+    if role == "user":
+        messages.append(HumanMessage(content=content))
+    elif role == "assistant":
+        messages.append(AIMessage(content=content))
 
-    messages.append(HumanMessage(content=question))
 
     response = llm.invoke(messages)
     if hasattr(response, "content"):
@@ -172,9 +173,9 @@ async def retell_webhook(request: Request):
     # Extract latest user message
     latest_user_message = ""
     for msg in reversed(transcript):
-        if msg.get("role") == "user" and msg.get("content", "").strip():
+         if msg.get("role") == "user" and msg.get("content", "").strip():
             latest_user_message = msg["content"].strip()
-            break
+         break
 
     if not latest_user_message:
         return {"response": "I didn't catch that. Could you repeat your question?"}
