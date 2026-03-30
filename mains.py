@@ -10,7 +10,6 @@ from models import CallSession
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from dotenv import load_dotenv
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
 from fastapi import Depends
 from sqlalchemy.orm import Session
@@ -69,7 +68,6 @@ def seed_doctors():
 Base.metadata.create_all(bind=engine)
 seed_doctors()
 
-load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
