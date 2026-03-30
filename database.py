@@ -2,20 +2,18 @@ from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker, declarative_base
 import os
 
-# ONLY load .env locally (not on Render)
-if os.getenv("RENDER") is None:
-    from dotenv import load_dotenv
-    load_dotenv()
+DATABASE_URL = os.environ.get("DATABASE_URL")
 
-DATABASE_URL = os.getenv("DATABASE_URL")
+print("🔥 RAW DATABASE_URL:", DATABASE_URL)
 
 if not DATABASE_URL:
-    raise ValueError("DATABASE_URL not set")
+    raise Exception("❌ DATABASE_URL NOT FOUND")
 
+# Force fix for postgres
 if DATABASE_URL.startswith("postgres://"):
     DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
 
-print("Using DB:", DATABASE_URL)
+print("🔥 FINAL DATABASE_URL:", DATABASE_URL)
 
 engine = create_engine(DATABASE_URL)
 
