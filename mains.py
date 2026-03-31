@@ -123,6 +123,61 @@ def notify_human(call_id, message):
 
 # ---------------- Booking Flow ---------------- #
 
+
+@app.get("/test-db")
+def test_db(db: Session = Depends(get_db)):
+    try:
+        result = db.execute("SELECT 1").fetchone()
+        return {"status": "DB connected", "result": result[0]}
+    except Exception as e:
+        return {"error": str(e)}
+    
+
+
+@app.get("/doctors")
+def get_doctors(db: Session = Depends(get_db)):
+    doctors = db.query(Doctor).all()
+
+    return [
+        {
+            "id": d.id,
+            "name": d.name,
+            "specialization": d.specialization,
+            "days": d.available_days,
+            "time": d.available_time
+        }
+        for d in doctors
+    ]
+
+
+@app.get("/appointments")
+def get_appointments(db: Session = Depends(get_db)):
+    appts = db.query(Appointment).all()
+
+    return [
+        {
+            "id": a.id,
+            "doctor_id": a.doctor_id,
+            "time": a.appointment_time
+        }
+        for a in appts
+    ]
+
+
+@app.get("/sessions")
+def get_sessions(db: Session = Depends(get_db)):
+    sessions = db.query(CallSession).all()
+
+    return [
+        {
+            "call_id": s.call_id,
+            "status": s.status,
+            "doctor": s.doctor_name,
+            "stage": s.booking_stage
+        }
+        for s in sessions
+    ]
+
 def handle_booking(db, call_id, user_text):
 
     session = db.query(CallSession).filter_by(call_id=call_id).first()
