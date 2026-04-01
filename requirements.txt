@@ -21,4 +21,4 @@ langchain-google-genai
 langchain-groq
 pypdf
 redis
-twilio
+twilio 

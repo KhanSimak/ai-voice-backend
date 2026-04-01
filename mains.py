@@ -14,7 +14,7 @@ from models import Doctor, Patient, Appointment, CallSession
 from schemas import AppointmentCreate
 from redis_client import get_history, append_message
 from rag import create_vectorstore, get_llm, ask_question
-
+from redis_client import r
 
 # ---------------- DB ---------------- #
 
@@ -127,11 +127,56 @@ def notify_human(call_id, message):
 @app.get("/test-db")
 def test_db(db: Session = Depends(get_db)):
     try:
-        result = db.execute("SELECT 1").fetchone()
-        return {"status": "DB connected", "result": result[0]}
+        doctors = db.query(Doctor).all()
+        appointments = db.query(Appointment).all()
+        sessions = db.query(CallSession).all()
+
+        return {
+            "status": "success",
+            "doctors_count": len(doctors),
+            "appointments_count": len(appointments),
+            "call_sessions_count": len(sessions)
+        }
+
     except Exception as e:
-        return {"error": str(e)}
+        return {
+            "status": "error",
+            "message": str(e)
+        }
     
+
+@app.get("/test-redis")
+def test_redis():
+    try:
+        test_call_id = "debug123"
+
+        # write test data
+        append_message(test_call_id, "user", "hello")
+        append_message(test_call_id, "assistant", "hi there")
+
+        # read it back
+        history = get_history(test_call_id)
+
+        return {
+            "status": "success",
+            "history": history
+        }
+
+    except Exception as e:
+        return {
+            "status": "error",
+            "message": str(e)
+        }
+    
+    from redis_client import r
+
+@app.get("/clear-redis/{call_id}")
+def clear_redis(call_id: str):
+    try:
+        r.delete(call_id)
+        return {"status": "cleared", "call_id": call_id}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 @app.get("/doctors")
@@ -349,7 +394,37 @@ async def retell_webhook(request: Request):
     finally:
         db.close()
 
+@app.get("/test-all")
+def test_all(db: Session = Depends(get_db)):
+    result = {}
 
+    # DB TEST
+    try:
+        doctors = db.query(Doctor).count()
+        result["db"] = f"OK ({doctors} doctors)"
+    except Exception as e:
+        result["db"] = f"ERROR: {str(e)}"
+
+    # REDIS TEST
+    try:
+        append_message("test", "user", "hello")
+        history = get_history("test")
+        result["redis"] = f"OK ({len(history)} messages)"
+    except Exception as e:
+        result["redis"] = f"ERROR: {str(e)}"
+
+    # AI TEST
+    try:
+        response = ask_question(
+            app.state.vectorstore,
+            app.state.llm,
+            "hello"
+        )
+        result["ai"] = "OK"
+    except Exception as e:
+        result["ai"] = f"ERROR: {str(e)}"
+
+    return result
 # ---------------- Run ---------------- #
 
 if __name__ == "__main__":
