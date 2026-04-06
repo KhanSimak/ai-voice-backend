@@ -1,5 +1,4 @@
-from dotenv import load_dotenv
-load_dotenv()
+
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer

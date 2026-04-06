@@ -1,22 +1,27 @@
-from sqlalchemy import Column, Integer, String, Date, DateTime, ForeignKey
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, JSON,ForeignKey
 from datetime import datetime
 from database import Base
 
 
 class CallSession(Base):
     __tablename__ = "call_sessions"
+
+    id = Column(Integer, primary_key=True, index=True)
+    call_id = Column(String)
+
+    booking_stage = Column(String)
+
+    # ✅ ADD ALL THESE
     status = Column(String, default="in_progress")
 
-    id = Column(Integer, primary_key=True)
-    call_id = Column(String, unique=True)
+    doctor_name = Column(String)
+    doctor_id = Column(Integer)
 
     patient_name = Column(String)
-    doctor_name = Column(String)
 
     appointment_date = Column(String)
     appointment_time = Column(String)
-    booking_stage = Column(String)
-    status = Column(String, default="in_progress")
+    conversation_history = Column(JSON, default=list)
 
 class Doctor(Base):
     __tablename__ = "doctors"

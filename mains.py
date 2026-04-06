@@ -99,10 +99,6 @@ def is_booking_intent(text: str):
     return any(k in text.lower() for k in keywords)
 
 
-def is_human_request(text: str):
-    keywords = ["human", "agent", "real person", "representative", "talk to someone"]
-    return any(k in text.lower() for k in keywords)
-
 
 def notify_human(call_id, message):
     try:
@@ -263,6 +259,7 @@ def handle_booking(db, call_id, user_text):
         return "May I have your name, please?"
 
     if session.booking_stage == "ask_name":
+
         session.patient_name = user_text
         session.booking_stage = "complete"
         session.status = "booked"
@@ -277,10 +274,54 @@ def handle_booking(db, call_id, user_text):
         db.add(appointment)
         db.commit()
 
-        return f"You're all set, {user_text}. Your appointment with {session.doctor_name} is booked."
+        # 🔥 WHATSAPP
+        send_whatsapp_reminder(
+            name=session.patient_name,
+            doctor=session.doctor_name,
+            date=session.appointment_date,
+            time=session.appointment_time
+        )
 
-    return "Sorry, could you repeat that?"
+        return (
+            f"Great {user_text}! Your appointment with {session.doctor_name} "
+            f"is confirmed on {session.appointment_date} at {session.appointment_time}. "
+            f"You will receive a WhatsApp confirmation shortly."
+        )
 
+
+
+
+
+def send_whatsapp_reminder(name, doctor, date, time):
+    try:
+        from twilio.rest import Client
+        import os
+
+        client = Client(
+            os.getenv("TWILIO_SID"),
+            os.getenv("TWILIO_TOKEN")
+        )
+
+        message = f"""
+Hello {name},
+
+Your appointment is confirmed ✅
+
+Doctor: {doctor}
+Date: {date}
+Time: {time}
+
+Please arrive 10 minutes early.
+        """
+
+        client.messages.create(
+            body=message,
+            from_="whatsapp:+14155238886",
+            to=os.getenv("PATIENT_PHONE_NUMBER")
+        )
+
+    except Exception as e:
+        print("WhatsApp Error:", e)
 
 # ---------------- RAG ---------------- #
 
@@ -330,7 +371,14 @@ async def ask(body: QuestionRequest):
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
 
-    body = await request.json()
+    try:
+        raw_body = await request.body()
+        print("RAW BODY:", raw_body)
+
+        body = await request.json()
+    except Exception:
+        return {"response": "Invalid request format"}
+
     call = body.get("call", {})
     call_id = call.get("call_id")
 
@@ -348,34 +396,60 @@ async def retell_webhook(request: Request):
     db = SessionLocal()
 
     try:
+        # ---------------- SESSION ---------------- #
         session = db.query(CallSession).filter_by(call_id=call_id).first()
 
         if not session:
             session = CallSession(
                 call_id=call_id,
                 booking_stage=None,
-                status="in_progress"
+                status="in_progress",
+                human_requested=False
             )
             db.add(session)
             db.commit()
 
         # ---------------- HUMAN HANDOFF ---------------- #
-        if is_human_request(latest_user_message):
 
-            notify_human(call_id, latest_user_message)
-
-            session.status = "human_requested"
+        # STEP 1: Ask confirmation
+        if is_human_request(latest_user_message) and not session.human_requested:
+            session.human_requested = True
             db.commit()
 
             return {
-                "response": "Alright, I’ll connect you to a human. Please hold on for a moment."
+                "response": "I can connect you to a human agent. Do you want me to transfer your call?"
             }
 
-        # ---------------- BOOKING ---------------- #
+        # STEP 2: Confirm + transfer
+        if session.human_requested:
+            if is_confirmation(latest_user_message):
+
+                session.human_requested = False
+                db.commit()
+
+                return {
+                    "response": "Connecting you to a human agent now. Please hold.",
+                    "actions": [
+                        {
+                            "type": "transfer_call",
+                            "to": os.getenv("HUMAN_PHONE_NUMBER")
+                        }
+                    ]
+                }
+
+            else:
+                session.human_requested = False
+                db.commit()
+
+                return {
+                    "response": "Alright, I’ll continue assisting you."
+                }
+
+        # ---------------- BOOKING FLOW ---------------- #
         if is_booking_intent(latest_user_message) or session.booking_stage:
             response = handle_booking(db, call_id, latest_user_message)
 
-        # ---------------- RAG ---------------- #
+        # ---------------- RAG FLOW ---------------- #
         else:
             history = get_history(call_id)
 
@@ -386,13 +460,41 @@ async def retell_webhook(request: Request):
                 history
             )
 
+        # ---------------- SAVE MEMORY ---------------- #
         append_message(call_id, "user", latest_user_message)
         append_message(call_id, "assistant", response)
 
         return {"response": response}
 
+    except Exception as e:
+        print("Webhook error:", e)
+        return {"response": "Sorry, something went wrong. Please try again."}
+
     finally:
         db.close()
+
+def is_human_request(text: str):
+    keywords = ["human", "agent", "real person", "representative", "talk to someone"]
+    return any(k in text.lower() for k in keywords)
+
+
+def is_confirmation(text: str):
+    confirm_words = ["yes", "yeah", "yep", "sure", "okay", "please"]
+    return any(word in text.lower() for word in confirm_words)
+
+def transfer_call():
+    return {
+        "response": "Connecting you to a human agent now. Please hold.",
+        "actions": [
+            {
+                "type": "transfer_call",
+                "to": os.getenv("HUMAN_PHONE_NUMBER")  # your number
+            }
+        ]
+    }
+
+# Step 2 → User confirms
+
 
 @app.get("/test-all")
 def test_all(db: Session = Depends(get_db)):
