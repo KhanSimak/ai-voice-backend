@@ -47,3 +47,4 @@ class Appointment(Base):
     doctor_id = Column(Integer, ForeignKey("doctors.id"))
     patient_id = Column(Integer, ForeignKey("patients.id"))
     appointment_time = Column(DateTime)
+    human_requested = Column(Boolean, default=False)
