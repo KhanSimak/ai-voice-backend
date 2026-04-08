@@ -8,7 +8,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from langchain.schema import HumanMessage, SystemMessage, AIMessage
 from twilio.rest import Client
-
+from fastapi.responses import JSONResponse
 from database import engine, SessionLocal, Base
 from models import Doctor, Patient, Appointment, CallSession
 from schemas import AppointmentCreate
