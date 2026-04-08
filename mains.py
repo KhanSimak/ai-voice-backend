@@ -431,29 +431,24 @@ async def ask(body: QuestionRequest):
 async def retell_webhook(request: Request):
 
     body = await request.json()
-    print("EVENT:", body.get("event"))
-
     event = body.get("event")
+
+    print("EVENT:", event)
+
+    # ONLY REAL-TIME EVENTS
+    if event not in ["call_started", "utterance", "transcript_updated"]:
+        return {"response": ""}
+
     call = body.get("call", {})
     call_id = call.get("call_id")
 
-    # -------------------------------
-    # 1. CALL START
-    # -------------------------------
+    # ---------------- call start ----------------
     if event == "call_started":
         return {
-            "response": "Hello! I am your assistant. How can I help you today?"
+            "response": "Hello! How can I help you today?"
         }
 
-    # -------------------------------
-    # 2. ONLY PROCESS LIVE USER INPUT
-    # -------------------------------
-    if event not in ["transcript_updated", "user_message", "call_analyzed"]:
-        return {"response": ""}
-
-    # -------------------------------
-    # 3. GET LAST USER MESSAGE (REAL-TIME SAFE)
-    # -------------------------------
+    # ---------------- extract latest user text ----------------
     transcript = call.get("transcript", "")
 
     latest_user_message = ""
@@ -465,56 +460,16 @@ async def retell_webhook(request: Request):
     if not latest_user_message:
         return {"response": ""}
 
-    # -------------------------------
-    # 4. DB SESSION
-    # -------------------------------
-    db = SessionLocal()
+    # ---------------- RAG CALL ----------------
+    response = ask_question_for_voice(
+        app.state.vectorstore,
+        app.state.llm,
+        latest_user_message,
+        get_history(call_id)
+    )
 
-    try:
-        session = db.query(CallSession).filter_by(call_id=call_id).first()
-
-        if not session:
-            session = CallSession(call_id=call_id)
-            db.add(session)
-            db.commit()
-
-        # -------------------------------
-        # 5. HUMAN HANDOFF
-        # -------------------------------
-        if is_human_request(latest_user_message):
-            return {
-                "response": "Do you want me to transfer you to a human agent?"
-            }
-
-        # -------------------------------
-        # 6. BOOKING FLOW
-        # -------------------------------
-        if is_booking_intent(latest_user_message):
-            response = handle_booking(db, call_id, latest_user_message)
-
-        # -------------------------------
-        # 7. RAG (PDF QA)
-        # -------------------------------
-        else:
-            history = get_history(call_id)
-
-            response = ask_question_for_voice(
-                app.state.vectorstore,
-                app.state.llm,
-                latest_user_message,
-                history
-            )
-
-        # -------------------------------
-        # 8. MEMORY
-        # -------------------------------
-        append_message(call_id, "user", latest_user_message)
-        append_message(call_id, "assistant", response)
-
-        return {"response": response}
-
-    finally:
-        db.close()
+    return {"response": response}
+print("EVENT RECEIVED:", body)
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
