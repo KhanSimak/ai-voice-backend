@@ -15,8 +15,15 @@ from schemas import AppointmentCreate
 from redis_client import get_history, append_message
 from rag import create_vectorstore, get_llm, ask_question
 from redis_client import r
-from models import CallSession
+from dotenv import load_dotenv
 # ---------------- DB ---------------- #
+load_dotenv(dotenv_path="C:/ai voice/.env")
+load_dotenv(override=True)
+
+import os
+
+
+
 
 def get_db():
     db = SessionLocal()
@@ -59,10 +66,16 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    from dotenv import load_dotenv
+    load_dotenv()
+
     logger.info("Starting up...")
+
     app.state.vectorstore = create_vectorstore()
     app.state.llm = get_llm()
+
     yield
+
     logger.info("Shutting down...")
 
 # ---------------- App ---------------- #
@@ -164,7 +177,6 @@ def test_redis():
             "message": str(e)
         }
     
-    from redis_client import r
 
 @app.get("/clear-redis/{call_id}")
 def clear_redis(call_id: str):
@@ -366,7 +378,7 @@ def root():
 async def ask(body: QuestionRequest):
     answer = ask_question(app.state.vectorstore, app.state.llm, body.question)
     return {"answer": answer}
-
+   
 
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):

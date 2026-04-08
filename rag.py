@@ -10,6 +10,9 @@ from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, SystemMessage
 logger = logging.getLogger(__name__)
 
+from groq import Groq
+import os
+
 
 def create_vectorstore():
     """
@@ -59,18 +62,18 @@ def create_vectorstore():
 
 
 def get_llm():
-    """Returns a ChatGroq instance using llama-4-scout."""
-    groq_api_key = os.environ.get("GROQ_API_KEY")
-    if not groq_api_key:
-        raise ValueError("GROQ_API_KEY environment variable is not set.")
+    groq_api_key = os.getenv("GROQ_API_KEY")
 
-    llm = ChatGroq(
-        groq_api_key=groq_api_key,
-        model_name="meta-llama/llama-4-scout-17b-16e-instruct",
+    if not groq_api_key:
+        raise ValueError("GROQ_API_KEY is missing")
+
+    return ChatGroq(
+        api_key=groq_api_key.strip(),
+        model="meta-llama/llama-4-scout-17b-16e-instruct",
         temperature=0.2,
         max_tokens=1024,
     )
-    return llm
+
 
 
 def ask_question(vectorstore, llm, question: str) -> str:
