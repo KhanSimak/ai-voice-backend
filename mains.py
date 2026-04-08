@@ -404,20 +404,38 @@ async def ask(body: QuestionRequest):
 
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
+    data = await request.json()
 
-    try:
-        body = await request.json()
-        event = body.get("event")
+    event = data.get("event")
 
-        print("EVENT:", event)
+    # 🟢 1. Call started
+    if event == "call_started":
+        return JSONResponse({
+            "status": "ok"
+        })
 
-        return {"response": "ok"}
+    # 🟡 2. Live transcript / analysis (MAIN LOGIC HERE)
+    if event == "call_analyzed":
+       is_final = data.get("is_final", False)
 
-    except Exception as e:
-        print("WEBHOOK ERROR:", e)
-        return {"response": "error"}
-    
-    
+       if not is_final:
+        return {"status": "waiting"}
+
+        transcript = data.get("transcript", "")
+        reply = generate_response(transcript)
+
+    return {"response": reply}
+
+    # 🔴 3. Call ended
+    if event == "call_ended":
+        call_id = data.get("call_id")
+        return JSONResponse({
+            "status": "call ended",
+            "call_id": call_id
+        })
+
+    return JSONResponse({"status": "ignored event"})
+
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
