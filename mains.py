@@ -428,8 +428,8 @@ async def retell_webhook(request: Request):
     )
 
     return {
-      "response_type": "text",
-      "text": "Hello this is test reply"
+      "type": "say",
+      "content": "Hello this is test voice reply"
     }
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
