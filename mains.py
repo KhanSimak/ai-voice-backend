@@ -20,7 +20,11 @@ from dotenv import load_dotenv
 load_dotenv(dotenv_path="C:/ai voice/.env")
 load_dotenv(override=True)
 
-import os
+from pydantic import BaseModel
+
+class ChatRequest(BaseModel):
+    text: str
+
 
 
 
@@ -462,10 +466,11 @@ def transfer_call():
 
 # Step 2 → User confirms
 
-@app.post("/chat")
-async def chat(text: str):
-    return {"response": f"You said: {text}"}
 
+@app.post("/chat")
+async def chat(req: ChatRequest):
+    print("🔥 API CALLED:", req.text)
+    return {"response": f"You said: {req.text}"}
 
 @app.get("/test-all")
 def test_all(db: Session = Depends(get_db)):
