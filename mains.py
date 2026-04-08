@@ -462,6 +462,10 @@ def transfer_call():
 
 # Step 2 → User confirms
 
+@app.post("/chat")
+async def chat(text: str):
+    return {"response": f"You said: {text}"}
+
 
 @app.get("/test-all")
 def test_all(db: Session = Depends(get_db)):
