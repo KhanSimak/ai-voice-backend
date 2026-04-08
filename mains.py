@@ -469,7 +469,7 @@ async def retell_webhook(request: Request):
     )
 
     return {"response": response}
-print("EVENT RECEIVED:", body)
+
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
