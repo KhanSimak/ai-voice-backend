@@ -15,7 +15,7 @@ from schemas import AppointmentCreate
 from redis_client import get_history, append_message
 from rag import create_vectorstore, get_llm, ask_question
 from redis_client import r
-
+from models import CallSession
 # ---------------- DB ---------------- #
 
 def get_db():
@@ -404,7 +404,6 @@ async def retell_webhook(request: Request):
                 call_id=call_id,
                 booking_stage=None,
                 status="in_progress",
-                human_requested=False
             )
             db.add(session)
             db.commit()
