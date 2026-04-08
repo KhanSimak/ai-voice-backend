@@ -10,8 +10,6 @@ class CallSession(Base):
     call_id = Column(String)
 
     booking_stage = Column(String)
-
-    # ✅ ADD ALL THESE
     status = Column(String, default="in_progress")
 
     doctor_name = Column(String)
@@ -22,6 +20,8 @@ class CallSession(Base):
     appointment_date = Column(String)
     appointment_time = Column(String)
     conversation_history = Column(JSON, default=list)
+    human_requested = Column(Boolean, default=False)
+    print("✅ CallSession model loaded with human_requested")
 
 class Doctor(Base):
     __tablename__ = "doctors"
@@ -47,4 +47,4 @@ class Appointment(Base):
     doctor_id = Column(Integer, ForeignKey("doctors.id"))
     patient_id = Column(Integer, ForeignKey("patients.id"))
     appointment_time = Column(DateTime)
-    human_requested = Column(Boolean, default=False)
+    
