@@ -408,25 +408,34 @@ def generate_response(text: str):
     return f"You said: {text}"
 
 
+
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
     data = await request.json()
 
-    print("🔥 RETELL REQUEST:", data)
+    print("🔥 FULL DATA:", data)
 
-    # Extract user message (important)
+    # 🔥 THIS is what you need
     messages = data.get("messages", [])
-    
-    user_text = ""
-    if messages:
-        user_text = messages[-1].get("content", "")
 
-    # 🔥 Return in THIS format (VERY IMPORTANT)
+    if not messages:
+        return {
+            "choices": [
+                {
+                    "message": {
+                        "content": "Hello, how can I help you?"
+                    }
+                }
+            ]
+        }
+
+    user_text = messages[-1].get("content", "")
+
     return {
         "choices": [
             {
                 "message": {
-                    "content": f"Hello, you said: {user_text}"
+                    "content": f"You said: {user_text}"
                 }
             }
         ]
