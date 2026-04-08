@@ -405,32 +405,19 @@ async def ask(body: QuestionRequest):
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
 
-    body = await request.json()
-    event = body.get("event")
+    try:
+        body = await request.json()
+        event = body.get("event")
 
-    if event != "utterance":
-        return {"response": ""}
+        print("EVENT:", event)
 
-    user_text = body.get("text") or body.get("utterance", "")
+        return {"response": "ok"}
 
-    if not user_text:
-        return {"response": ""}
-
-    print("USER:", user_text)
-
-    history = get_history("default")
-
-    response = ask_question_for_voice(
-        app.state.vectorstore,
-        app.state.llm,
-        user_text,
-        history
-    )
-
-    return {
-      "type": "say",
-      "content": "Hello this is test voice reply"
-    }
+    except Exception as e:
+        print("WEBHOOK ERROR:", e)
+        return {"response": "error"}
+    
+    
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
