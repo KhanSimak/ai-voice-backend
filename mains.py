@@ -402,30 +402,36 @@ async def ask(body: QuestionRequest):
    
 
 
+
+
+def generate_response(text: str):
+    return f"You said: {text}"
+
+
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
     data = await request.json()
 
     event = data.get("event")
 
-    try:
-        if event == "call_analyzed":
-            transcript = data.get("transcript", "")
+    # 🔥 ONLY handle analyzed event
+    if event == "call_analyzed":
 
-            if not transcript:
-                return {"status": "no transcript"}
+        transcript = data.get("transcript", "")
+        is_final = data.get("is_final", True)
 
-            reply = generate_response(transcript)
+        # 🚨 prevent spam responses
+        if not transcript or not is_final:
+            return {"status": "waiting"}
 
-            return {"response": reply}
+        reply = generate_response(transcript)
 
-        return {"status": "ignored"}
-
-    except Exception as e:
+        # 🔥 THIS is what triggers voice
         return {
-            "status": "error",
-            "message": str(e)
+            "response": reply
         }
+
+    return {"status": "ignored"}
 
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
