@@ -337,35 +337,81 @@ Please arrive 10 minutes early.
 
 # ---------------- RAG ---------------- #
 
-def ask_question_for_voice(vectorstore, llm, question, history):
+def ask_question_for_voice(vectorstore, llm, query, history=None):
+    """
+    Voice-optimized RAG function for PDF QA (low latency, short answers)
+    """
 
-    docs = vectorstore.similarity_search(question, k=3)
+    try:
+        if history is None:
+            history = []
 
-    if docs:
+        # -----------------------------
+        # 1. RETRIEVE CONTEXT FROM PDF
+        # -----------------------------
+        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+        docs = retriever.get_relevant_documents(query)
+
         context = "\n\n".join([doc.page_content for doc in docs])
-        system = f"""
-You are a friendly clinic assistant speaking on a call.
-Keep answers short (2-3 sentences), natural, and conversational.
-Use this info if helpful:
 
-{context}
+        if not context.strip():
+            context = "No relevant context found in the document."
+
+        # -----------------------------
+        # 2. BUILD CONVERSATION HISTORY (SHORT)
+        # -----------------------------
+        chat_history = ""
+        for h in history[-4:]:  # keep last 4 turns only
+            role = h.get("role")
+            content = h.get("content")
+            chat_history += f"{role}: {content}\n"
+
+        # -----------------------------
+        # 3. SYSTEM PROMPT (VOICE OPTIMIZED)
+        # -----------------------------
+        system_prompt = """
+You are a real-time voice assistant.
+
+Rules:
+- Answer ONLY using the given context
+- If answer is not in context, say: "I don't have that information in the document"
+- Keep response VERY short (1-3 sentences max)
+- Speak naturally like a human assistant
+- Do NOT explain your thinking
 """
-    else:
-        system = "You are a friendly assistant. Keep answers short and natural."
 
-    messages = [SystemMessage(content=system)]
+        # -----------------------------
+        # 4. FINAL PROMPT
+        # -----------------------------
+        prompt = f"""
+{system_prompt}
 
-    for msg in history[-6:]:
-        if msg["role"] == "user":
-            messages.append(HumanMessage(content=msg["content"]))
-        else:
-            messages.append(AIMessage(content=msg["content"]))
+CHAT HISTORY:
+{chat_history}
 
-    messages.append(HumanMessage(content=question))
+CONTEXT FROM PDF:
+{context}
 
-    res = llm.invoke(messages)
-    return res.content if hasattr(res, "content") else str(res)
+USER QUESTION:
+{query}
 
+Answer:
+"""
+
+        # -----------------------------
+        # 5. CALL LLM
+        # -----------------------------
+        response = llm.invoke(prompt)
+
+        # if LangChain response object
+        if hasattr(response, "content"):
+            response = response.content
+
+        return response.strip()
+
+    except Exception as e:
+        print("RAG error:", e)
+        return "Sorry, I had trouble finding that information."
 
 # ---------------- Routes ---------------- #
 
@@ -384,94 +430,71 @@ async def ask(body: QuestionRequest):
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
 
-    try:
-        body = await request.json()
-        print("RAW BODY:", body)
-    except Exception:
-        return {"response": "Invalid request format"}
+    body = await request.json()
+    print("EVENT:", body.get("event"))
 
     event = body.get("event")
     call = body.get("call", {})
     call_id = call.get("call_id")
 
-    # -----------------------------
-    # 1. HANDLE CALL START
-    # -----------------------------
+    # -------------------------------
+    # 1. CALL START
+    # -------------------------------
     if event == "call_started":
         return {
-            "response": "Hello! How can I help you today?"
+            "response": "Hello! I am your assistant. How can I help you today?"
         }
 
-    # -----------------------------
-    # 2. EXTRACT USER MESSAGE (ROBUST)
-    # -----------------------------
-    latest_user_message = (
-        body.get("transcript")
-        or body.get("message")
-        or body.get("user_message")
-        or ""
-    ).strip()
+    # -------------------------------
+    # 2. ONLY PROCESS LIVE USER INPUT
+    # -------------------------------
+    if event not in ["transcript_updated", "user_message", "call_analyzed"]:
+        return {"response": ""}
+
+    # -------------------------------
+    # 3. GET LAST USER MESSAGE (REAL-TIME SAFE)
+    # -------------------------------
+    transcript = call.get("transcript", "")
+
+    latest_user_message = ""
+    for line in reversed(transcript.split("\n")):
+        if "User:" in line:
+            latest_user_message = line.replace("User:", "").strip()
+            break
 
     if not latest_user_message:
-        return {
-            "response": "Sorry, I didn’t catch that. Could you repeat?"
-        }
+        return {"response": ""}
 
+    # -------------------------------
+    # 4. DB SESSION
+    # -------------------------------
     db = SessionLocal()
 
     try:
-
-        # ---------------- SESSION ---------------- #
         session = db.query(CallSession).filter_by(call_id=call_id).first()
 
         if not session:
-            session = CallSession(
-                call_id=call_id,
-                booking_stage=None,
-                status="in_progress",
-                human_requested=False
-            )
+            session = CallSession(call_id=call_id)
             db.add(session)
             db.commit()
 
-        # ---------------- HUMAN HANDOFF ---------------- #
-        if is_human_request(latest_user_message) and not session.human_requested:
-            session.human_requested = True
-            db.commit()
-
+        # -------------------------------
+        # 5. HUMAN HANDOFF
+        # -------------------------------
+        if is_human_request(latest_user_message):
             return {
-                "response": "I can connect you to a human agent. Do you want me to transfer your call?"
+                "response": "Do you want me to transfer you to a human agent?"
             }
 
-        if session.human_requested:
-            if is_confirmation(latest_user_message):
-
-                session.human_requested = False
-                db.commit()
-
-                return {
-                    "response": "Connecting you to a human agent now. Please hold.",
-                    "actions": [
-                        {
-                            "type": "transfer_call",
-                            "to": os.getenv("HUMAN_PHONE_NUMBER")
-                        }
-                    ]
-                }
-
-            else:
-                session.human_requested = False
-                db.commit()
-
-                return {
-                    "response": "Alright, I’ll continue assisting you."
-                }
-
-        # ---------------- BOOKING FLOW ---------------- #
-        if is_booking_intent(latest_user_message) or session.booking_stage:
+        # -------------------------------
+        # 6. BOOKING FLOW
+        # -------------------------------
+        if is_booking_intent(latest_user_message):
             response = handle_booking(db, call_id, latest_user_message)
 
-        # ---------------- RAG (PDF QA) FLOW ---------------- #
+        # -------------------------------
+        # 7. RAG (PDF QA)
+        # -------------------------------
         else:
             history = get_history(call_id)
 
@@ -482,19 +505,13 @@ async def retell_webhook(request: Request):
                 history
             )
 
-        # ---------------- MEMORY ---------------- #
+        # -------------------------------
+        # 8. MEMORY
+        # -------------------------------
         append_message(call_id, "user", latest_user_message)
         append_message(call_id, "assistant", response)
 
-        return {
-            "response": response
-        }
-
-    except Exception as e:
-        print("Webhook error:", e)
-        return {
-            "response": "Sorry, something went wrong. Please try again."
-        }
+        return {"response": response}
 
     finally:
         db.close()
