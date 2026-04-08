@@ -409,66 +409,65 @@ async def retell_webhook(request: Request):
     event = body.get("event")
 
     print("EVENT:", event)
-    print("BODY:", body)
 
-    # ---------------- CALL START ----------------
+    call = body.get("call", {})
+    call_id = call.get("call_id", "default")
+
+    # -------------------------------
+    # 1. REAL-TIME RESPONSE (optional)
+    # -------------------------------
     if event == "call_started":
-        return {
-            "response": "Hello! How can I help you today?"
-        }
+        return {"response": "Hello! How can I help you today?"}
 
-    # ---------------- GET USER MESSAGE ----------------
-    latest_user_message = ""
+    # -------------------------------
+    # 2. HANDLE REAL USER TEXT
+    # -------------------------------
+    user_text = ""
 
-    # Retell real-time formats
-    if event in ["utterance", "transcript_updated", "user_message"]:
-        latest_user_message = (
-            body.get("text")
-            or body.get("utterance")
-            or body.get("transcript")
-            or ""
-        ).strip()
+    # case A: real-time utterance
+    if "text" in body:
+        user_text = body.get("text")
 
-    # ignore empty
-    if not latest_user_message:
+    elif "utterance" in body:
+        user_text = body.get("utterance")
+
+    # -------------------------------
+    # 3. HANDLE FINAL TRANSCRIPT (IMPORTANT FIX)
+    # -------------------------------
+    elif event in ["call_ended", "call_analyzed"]:
+        transcript = call.get("transcript", "")
+
+        lines = transcript.split("\n")
+
+        # get last user message
+        for line in reversed(lines):
+            if line.startswith("User:"):
+                user_text = line.replace("User:", "").strip()
+                break
+
+    # ignore if empty
+    if not user_text:
         return {"response": ""}
 
-    print("USER SAID:", latest_user_message)
+    print("USER TEXT:", user_text)
 
-    # ---------------- GET HISTORY ----------------
-    call_id = body.get("call", {}).get("call_id", "default")
-
+    # -------------------------------
+    # 4. RAG + MEMORY
+    # -------------------------------
     history = get_history(call_id)
 
-    # ---------------- HUMAN HANDOFF ----------------
-    if is_human_request(latest_user_message):
-        return {
-            "response": "I can connect you to a human agent. Do you want me to transfer the call?"
-        }
+    response = ask_question_for_voice(
+        app.state.vectorstore,
+        app.state.llm,
+        user_text,
+        history
+    )
 
-    # ---------------- BOOKING FLOW ----------------
-    db = SessionLocal()
-    try:
-        session = db.query(CallSession).filter_by(call_id=call_id).first()
+    append_message(call_id, "user", user_text)
+    append_message(call_id, "assistant", response)
 
-        if is_booking_intent(latest_user_message) or session:
-            response = handle_booking(db, call_id, latest_user_message)
-        else:
-            # ---------------- RAG ----------------
-            response = ask_question_for_voice(
-                app.state.vectorstore,
-                app.state.llm,
-                latest_user_message,
-                history
-            )
+    return {"response": response}
 
-        append_message(call_id, "user", latest_user_message)
-        append_message(call_id, "assistant", response)
-
-        return {"response": response}
-
-    finally:
-        db.close()
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
