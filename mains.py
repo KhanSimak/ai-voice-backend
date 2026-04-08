@@ -380,34 +380,47 @@ async def ask(body: QuestionRequest):
     return {"answer": answer}
    
 
+
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request):
 
     try:
-        raw_body = await request.body()
-        print("RAW BODY:", raw_body)
-
         body = await request.json()
+        print("RAW BODY:", body)
     except Exception:
         return {"response": "Invalid request format"}
 
+    event = body.get("event")
     call = body.get("call", {})
     call_id = call.get("call_id")
 
-    transcript = call.get("transcript_object", [])
+    # -----------------------------
+    # 1. HANDLE CALL START
+    # -----------------------------
+    if event == "call_started":
+        return {
+            "response": "Hello! How can I help you today?"
+        }
 
-    latest_user_message = ""
-    for msg in reversed(transcript):
-        if msg.get("role") == "user":
-            latest_user_message = msg.get("content", "").strip()
-            break
+    # -----------------------------
+    # 2. EXTRACT USER MESSAGE (ROBUST)
+    # -----------------------------
+    latest_user_message = (
+        body.get("transcript")
+        or body.get("message")
+        or body.get("user_message")
+        or ""
+    ).strip()
 
     if not latest_user_message:
-        return {"response": "Sorry, I didn’t catch that. Could you repeat?"}
+        return {
+            "response": "Sorry, I didn’t catch that. Could you repeat?"
+        }
 
     db = SessionLocal()
 
     try:
+
         # ---------------- SESSION ---------------- #
         session = db.query(CallSession).filter_by(call_id=call_id).first()
 
@@ -416,13 +429,12 @@ async def retell_webhook(request: Request):
                 call_id=call_id,
                 booking_stage=None,
                 status="in_progress",
+                human_requested=False
             )
             db.add(session)
             db.commit()
 
         # ---------------- HUMAN HANDOFF ---------------- #
-
-        # STEP 1: Ask confirmation
         if is_human_request(latest_user_message) and not session.human_requested:
             session.human_requested = True
             db.commit()
@@ -431,7 +443,6 @@ async def retell_webhook(request: Request):
                 "response": "I can connect you to a human agent. Do you want me to transfer your call?"
             }
 
-        # STEP 2: Confirm + transfer
         if session.human_requested:
             if is_confirmation(latest_user_message):
 
@@ -460,7 +471,7 @@ async def retell_webhook(request: Request):
         if is_booking_intent(latest_user_message) or session.booking_stage:
             response = handle_booking(db, call_id, latest_user_message)
 
-        # ---------------- RAG FLOW ---------------- #
+        # ---------------- RAG (PDF QA) FLOW ---------------- #
         else:
             history = get_history(call_id)
 
@@ -471,19 +482,22 @@ async def retell_webhook(request: Request):
                 history
             )
 
-        # ---------------- SAVE MEMORY ---------------- #
+        # ---------------- MEMORY ---------------- #
         append_message(call_id, "user", latest_user_message)
         append_message(call_id, "assistant", response)
 
-        return {"response": response}
+        return {
+            "response": response
+        }
 
     except Exception as e:
         print("Webhook error:", e)
-        return {"response": "Sorry, something went wrong. Please try again."}
+        return {
+            "response": "Sorry, something went wrong. Please try again."
+        }
 
     finally:
         db.close()
-
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
