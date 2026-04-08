@@ -96,8 +96,8 @@ app.add_middleware(
 # ---------------- Schemas ---------------- #
 
 class QuestionRequest(BaseModel):
-    question: str
-
+    text: str = None
+    question: str = None
 
 # ---------------- Helpers ---------------- #
 
@@ -467,11 +467,20 @@ def transfer_call():
 # Step 2 → User confirms
 
 
-@app.post("/chat")
-async def chat(req: ChatRequest):
-    print("🔥 API CALLED:", req.text)
-    return {"response": f"You said: {req.text}"}
+@app.post("/ask")
+async def ask(body: QuestionRequest):
+    query = body.text or body.question
 
+    if not query:
+        return {"answer": "No input provided"}
+
+    answer = ask_question(
+        app.state.vectorstore,
+        app.state.llm,
+        query
+    )
+
+    return {"answer": answer}
 @app.get("/test-all")
 def test_all(db: Session = Depends(get_db)):
     result = {}
