@@ -412,27 +412,25 @@ def generate_response(text: str):
 async def retell_webhook(request: Request):
     data = await request.json()
 
-    event = data.get("event")
+    print("🔥 RETELL REQUEST:", data)
 
-    # 🔥 ONLY handle analyzed event
-    if event == "call_analyzed":
+    # Extract user message (important)
+    messages = data.get("messages", [])
+    
+    user_text = ""
+    if messages:
+        user_text = messages[-1].get("content", "")
 
-        transcript = data.get("transcript", "")
-        is_final = data.get("is_final", True)
-
-        # 🚨 prevent spam responses
-        if not transcript or not is_final:
-            return {"status": "waiting"}
-
-        reply = generate_response(transcript)
-
-        # 🔥 THIS is what triggers voice
-        return {
-            "response": reply
-        }
-
-    return {"status": "ignored"}
-
+    # 🔥 Return in THIS format (VERY IMPORTANT)
+    return {
+        "choices": [
+            {
+                "message": {
+                    "content": f"Hello, you said: {user_text}"
+                }
+            }
+        ]
+    }
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
