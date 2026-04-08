@@ -408,53 +408,17 @@ async def retell_webhook(request: Request):
     body = await request.json()
     event = body.get("event")
 
-    print("EVENT:", event)
+    if event != "utterance":
+        return {"response": ""}
 
-    call = body.get("call", {})
-    call_id = call.get("call_id", "default")
+    user_text = body.get("text") or body.get("utterance", "")
 
-    # -------------------------------
-    # 1. REAL-TIME RESPONSE (optional)
-    # -------------------------------
-    if event == "call_started":
-        return {"response": "Hello! How can I help you today?"}
-
-    # -------------------------------
-    # 2. HANDLE REAL USER TEXT
-    # -------------------------------
-    user_text = ""
-
-    # case A: real-time utterance
-    if "text" in body:
-        user_text = body.get("text")
-
-    elif "utterance" in body:
-        user_text = body.get("utterance")
-
-    # -------------------------------
-    # 3. HANDLE FINAL TRANSCRIPT (IMPORTANT FIX)
-    # -------------------------------
-    elif event in ["call_ended", "call_analyzed"]:
-        transcript = call.get("transcript", "")
-
-        lines = transcript.split("\n")
-
-        # get last user message
-        for line in reversed(lines):
-            if line.startswith("User:"):
-                user_text = line.replace("User:", "").strip()
-                break
-
-    # ignore if empty
     if not user_text:
         return {"response": ""}
 
-    print("USER TEXT:", user_text)
+    print("USER:", user_text)
 
-    # -------------------------------
-    # 4. RAG + MEMORY
-    # -------------------------------
-    history = get_history(call_id)
+    history = get_history("default")
 
     response = ask_question_for_voice(
         app.state.vectorstore,
@@ -463,11 +427,10 @@ async def retell_webhook(request: Request):
         history
     )
 
-    append_message(call_id, "user", user_text)
-    append_message(call_id, "assistant", response)
-
-    return {"response": response}
-
+    return {
+      "response_type": "text",
+      "text": "Hello this is test reply"
+    }
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
