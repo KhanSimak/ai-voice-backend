@@ -338,81 +338,56 @@ Please arrive 10 minutes early.
 # ---------------- RAG ---------------- #
 
 def ask_question_for_voice(vectorstore, llm, query, history=None):
-    """
-    Voice-optimized RAG function for PDF QA (low latency, short answers)
-    """
 
     try:
+        if not query:
+            return "I didn't understand that."
+
         if history is None:
             history = []
 
-        # -----------------------------
-        # 1. RETRIEVE CONTEXT FROM PDF
-        # -----------------------------
+        # ---------------- RETRIEVE ----------------
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-        docs = retriever.get_relevant_documents(query)
+        docs = retriever.invoke(query)
 
-        context = "\n\n".join([doc.page_content for doc in docs])
+        context = "\n\n".join([d.page_content for d in docs])
 
-        if not context.strip():
-            context = "No relevant context found in the document."
+        if not context:
+            context = "No relevant information found."
 
-        # -----------------------------
-        # 2. BUILD CONVERSATION HISTORY (SHORT)
-        # -----------------------------
+        # ---------------- HISTORY ----------------
         chat_history = ""
-        for h in history[-4:]:  # keep last 4 turns only
-            role = h.get("role")
-            content = h.get("content")
-            chat_history += f"{role}: {content}\n"
+        for h in history[-4:]:
+            chat_history += f"{h.get('role')}: {h.get('content')}\n"
 
-        # -----------------------------
-        # 3. SYSTEM PROMPT (VOICE OPTIMIZED)
-        # -----------------------------
-        system_prompt = """
-You are a real-time voice assistant.
-
-Rules:
-- Answer ONLY using the given context
-- If answer is not in context, say: "I don't have that information in the document"
-- Keep response VERY short (1-3 sentences max)
-- Speak naturally like a human assistant
-- Do NOT explain your thinking
-"""
-
-        # -----------------------------
-        # 4. FINAL PROMPT
-        # -----------------------------
+        # ---------------- PROMPT ----------------
         prompt = f"""
-{system_prompt}
+You are a real-time voice AI assistant.
+
+RULES:
+- Use ONLY context
+- If not found say "I don't have that information"
+- Keep answer under 2-3 sentences
 
 CHAT HISTORY:
 {chat_history}
 
-CONTEXT FROM PDF:
+CONTEXT:
 {context}
 
-USER QUESTION:
+USER:
 {query}
 
-Answer:
+ANSWER:
 """
 
-        # -----------------------------
-        # 5. CALL LLM
-        # -----------------------------
-        response = llm.invoke(prompt)
+        res = llm.invoke(prompt)
 
-        # if LangChain response object
-        if hasattr(response, "content"):
-            response = response.content
-
-        return response.strip()
+        return res.content if hasattr(res, "content") else str(res)
 
     except Exception as e:
-        print("RAG error:", e)
-        return "Sorry, I had trouble finding that information."
-
+        print("RAG ERROR:", e)
+        return "Sorry, I had trouble processing that."
 # ---------------- Routes ---------------- #
 
 @app.get("/")
@@ -434,42 +409,66 @@ async def retell_webhook(request: Request):
     event = body.get("event")
 
     print("EVENT:", event)
+    print("BODY:", body)
 
-    # ONLY REAL-TIME EVENTS
-    if event not in ["call_started", "utterance", "transcript_updated"]:
-        return {"response": ""}
-
-    call = body.get("call", {})
-    call_id = call.get("call_id")
-
-    # ---------------- call start ----------------
+    # ---------------- CALL START ----------------
     if event == "call_started":
         return {
             "response": "Hello! How can I help you today?"
         }
 
-    # ---------------- extract latest user text ----------------
-    transcript = call.get("transcript", "")
-
+    # ---------------- GET USER MESSAGE ----------------
     latest_user_message = ""
-    for line in reversed(transcript.split("\n")):
-        if "User:" in line:
-            latest_user_message = line.replace("User:", "").strip()
-            break
 
+    # Retell real-time formats
+    if event in ["utterance", "transcript_updated", "user_message"]:
+        latest_user_message = (
+            body.get("text")
+            or body.get("utterance")
+            or body.get("transcript")
+            or ""
+        ).strip()
+
+    # ignore empty
     if not latest_user_message:
         return {"response": ""}
 
-    # ---------------- RAG CALL ----------------
-    response = ask_question_for_voice(
-        app.state.vectorstore,
-        app.state.llm,
-        latest_user_message,
-        get_history(call_id)
-    )
+    print("USER SAID:", latest_user_message)
 
-    return {"response": response}
+    # ---------------- GET HISTORY ----------------
+    call_id = body.get("call", {}).get("call_id", "default")
 
+    history = get_history(call_id)
+
+    # ---------------- HUMAN HANDOFF ----------------
+    if is_human_request(latest_user_message):
+        return {
+            "response": "I can connect you to a human agent. Do you want me to transfer the call?"
+        }
+
+    # ---------------- BOOKING FLOW ----------------
+    db = SessionLocal()
+    try:
+        session = db.query(CallSession).filter_by(call_id=call_id).first()
+
+        if is_booking_intent(latest_user_message) or session:
+            response = handle_booking(db, call_id, latest_user_message)
+        else:
+            # ---------------- RAG ----------------
+            response = ask_question_for_voice(
+                app.state.vectorstore,
+                app.state.llm,
+                latest_user_message,
+                history
+            )
+
+        append_message(call_id, "user", latest_user_message)
+        append_message(call_id, "assistant", response)
+
+        return {"response": response}
+
+    finally:
+        db.close()
 def is_human_request(text: str):
     keywords = ["human", "agent", "real person", "representative", "talk to someone"]
     return any(k in text.lower() for k in keywords)
