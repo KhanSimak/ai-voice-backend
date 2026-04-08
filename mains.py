@@ -314,6 +314,11 @@ async def ask(body: QuestionRequest):
 
     return {"answer": answer}
 
+@app.get("/test-db")
+def test_db(db: Session = Depends(get_db)):
+    doctors = db.query(Doctor).all()
+    return {"count": len(doctors)}
+
 # ---------------- DEBUG ---------------- #
 
 @app.get("/test-all")
