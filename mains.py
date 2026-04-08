@@ -322,6 +322,6 @@ def test_all(db: Session = Depends(get_db)):
 
     return result
 
-# ---------------- RUN ---------------- #
+# ---------------- RUN -------------43--- #
 if __name__ == "__main__":
     uvicorn.run("mains:app", host="0.0.0.0", port=8000)
