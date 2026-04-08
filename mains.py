@@ -140,25 +140,27 @@ async def chat(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.body()
 
-        # ✅ handle empty body
         if not body:
             return {"response": "I didn't catch that. Can you repeat?"}
 
-        # ✅ parse JSON safely
         try:
             data = await request.json()
-        except Exception as e:
-            print("JSON ERROR:", e)
-            return {"response": "Invalid input"}
+        except Exception:
+            return {"response": "Invalid JSON"}
 
         text = data.get("text", "").lower().strip()
 
         if not text:
             return {"response": "Can you say that again?"}
 
-        # ✅ doctor query
-        if "doctor" in text:
+        # -------------------------------
+        # DOCTOR QUERY
+        # -------------------------------
+        if any(word in text for word in ["doctor", "doctors", "available", "appointment"]):
             doctors = db.query(Doctor).all()
+
+            if not doctors:
+                return {"response": "No doctors found."}
 
             return {
                 "response": "\n".join([
@@ -167,7 +169,9 @@ async def chat(request: Request, db: Session = Depends(get_db)):
                 ])
             }
 
-        # ✅ fallback AI
+        # -------------------------------
+        # AI RESPONSE
+        # -------------------------------
         response = ask_question_for_voice(
             app.state.vectorstore,
             app.state.llm,
@@ -177,17 +181,19 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         return {"response": response}
 
     except Exception as e:
-        print("CHAT ERROR:", e)
+        print("❌ CHAT ERROR:", str(e))
         return {"response": "Something went wrong"}
+
+
 # ✅ RETELL WEBHOOK (FIXED)
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request, db: Session = Depends(get_db)):
     try:
         body = await request.body()
 
-        # 🛑 Ignore empty requests (Retell sends these)
+        # 🛑 Ignore empty requests
         if not body:
-            return {"status": "ignored"}
+            return {"status": "ignored_empty"}
 
         try:
             data = await request.json()
@@ -196,28 +202,29 @@ async def retell_webhook(request: Request, db: Session = Depends(get_db)):
 
         print("🔥 FULL DATA:", data)
 
+        # 🛑 Ignore non-response events
         event = data.get("event")
-
-        # 🛑 Ignore events that don't need response
         if event in ["call_started", "call_ended", "call_analyzed"]:
             return {"status": f"ignored_{event}"}
 
-        # ✅ Extract messages
+        # -------------------------------
+        # ✅ EXTRACT USER TEXT
+        # -------------------------------
         messages = data.get("messages", [])
-
-        if not messages:
-            return {
-                "choices": [
-                    {"message": {"content": "Hello, how can I help you?"}}
-                ]
-            }
-
-        # ✅ Get last user message
         user_text = None
-        for msg in reversed(messages):
-            if msg.get("role") == "user":
-                user_text = msg.get("content")
-                break
+
+        # Try from messages
+        if messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    user_text = msg.get("content")
+                    break
+
+        # 🔥 Fallback from transcript
+        if not user_text:
+            transcript = data.get("call", {}).get("transcript", "")
+            if "User:" in transcript:
+                user_text = transcript.split("User:")[-1].strip()
 
         if not user_text:
             return {
@@ -227,25 +234,31 @@ async def retell_webhook(request: Request, db: Session = Depends(get_db)):
             }
 
         user_text = user_text.lower().strip()
+        print("🧠 USER:", user_text)
 
         call_id = data.get("call", {}).get("call_id", "default")
 
-        # 🔥 HISTORY (Redis)
+        # -------------------------------
+        # 🔥 REDIS HISTORY
+        # -------------------------------
         history = get_history(call_id)
 
         # -------------------------------
-        # ✅ HANDLE DOCTOR QUERY DIRECTLY
+        # ✅ DOCTOR QUERY
         # -------------------------------
-        if "doctor" in user_text:
+        if any(word in user_text for word in ["doctor", "doctors", "available", "appointment"]):
             doctors = db.query(Doctor).all()
 
-            response = "Here are available doctors:\n" + "\n".join([
-                f"{d.name} - {d.specialization}"
-                for d in doctors
-            ])
+            if not doctors:
+                response = "No doctors are available right now."
+            else:
+                response = "Here are available doctors:\n" + "\n".join([
+                    f"{d.name} - {d.specialization}"
+                    for d in doctors
+                ])
 
         # -------------------------------
-        # ✅ AI RESPONSE
+        # ✅ AI RESPONSE (RAG)
         # -------------------------------
         else:
             response = ask_question_for_voice(
@@ -255,11 +268,15 @@ async def retell_webhook(request: Request, db: Session = Depends(get_db)):
                 history
             )
 
+        # -------------------------------
         # 🔥 SAVE HISTORY
+        # -------------------------------
         append_message(call_id, "user", user_text)
         append_message(call_id, "assistant", response)
 
-        # ✅ RETELL FORMAT (VERY IMPORTANT)
+        # -------------------------------
+        # ✅ RETELL RESPONSE FORMAT
+        # -------------------------------
         return {
             "choices": [
                 {
