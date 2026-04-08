@@ -481,6 +481,33 @@ def transfer_call():
 
 # Step 2 → User confirms
 
+@app.post("/chat")
+async def chat(request: Request, db: Session = Depends(get_db)):
+    data = await request.json()
+    text = data.get("text", "").lower()
+
+    # 🔥 doctor query
+    if "doctor" in text:
+        doctors = db.query(Doctor).all()
+
+        return {
+            "response": "\n".join([
+                f"{d.name} - {d.specialization}"
+                for d in doctors
+            ])
+        }
+
+    # fallback AI
+    response = ask_question_for_voice(
+        app.state.vectorstore,
+        app.state.llm,
+        text
+    )
+
+    return {"response": response}
+
+
+
 
 @app.post("/ask")
 async def ask(body: QuestionRequest):
