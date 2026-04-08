@@ -433,13 +433,28 @@ async def retell_webhook(request: Request):
             ]
         }
 
-    user_text = messages[-1].get("content", "")
+    call_id = data.get("call", {}).get("call_id")
+
+# 🔥 get history
+    history = get_history(call_id)
+
+# 🔥 AI response
+    response = ask_question_for_voice(
+      app.state.vectorstore,
+      app.state.llm,
+      user_text,
+      history
+    )
+
+# 🔥 save history
+    append_message(call_id, "user", user_text)
+    append_message(call_id, "assistant", response)
 
     return {
         "choices": [
             {
                 "message": {
-                    "content": f"You said: {user_text}"
+                    "content": response
                 }
             }
         ]
