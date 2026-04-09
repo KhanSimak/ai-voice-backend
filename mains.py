@@ -138,167 +138,119 @@ def root():
 @app.post("/chat")
 async def chat(request: Request, db: Session = Depends(get_db)):
     try:
-        body = await request.body()
+        data = await request.json()
+    except:
+        return {"output": "Sorry, I didn’t understand."}
 
-        if not body:
-            return {"response": "I didn't catch that. Can you repeat?"}
+    # ✅ Vapi sends messages array
+    messages = data.get("messages", [])
 
-        try:
-            data = await request.json()
-        except Exception:
-            return {"response": "Invalid JSON"}
+    if not messages:
+        return {"output": "Hello, how can I help you?"}
 
-        text = data.get("text", "").lower().strip()
+    # Get last user message
+    last_message = messages[-1].get("content", "").lower()
 
-        if not text:
-            return {"response": "Can you say that again?"}
+    if not last_message:
+        return {"output": "Can you repeat that?"}
 
-        # -------------------------------
-        # DOCTOR QUERY
-        # -------------------------------
-        if any(word in text for word in ["doctor", "doctors", "available", "appointment"]):
-            doctors = db.query(Doctor).all()
+    # ✅ Doctor query
+    if "doctor" in last_message:
+        doctors = db.query(Doctor).all()
 
-            if not doctors:
-                return {"response": "No doctors found."}
+        response = "\n".join([
+            f"{d.name} - {d.specialization}"
+            for d in doctors
+        ])
 
-            return {
-                "response": "\n".join([
-                    f"{d.name} - {d.specialization}"
-                    for d in doctors
-                ])
-            }
+        return {"output": response}
 
-        # -------------------------------
-        # AI RESPONSE
-        # -------------------------------
-        response = ask_question_for_voice(
-            app.state.vectorstore,
-            app.state.llm,
-            text
-        )
+    # ✅ Fallback AI
+    response = ask_question_for_voice(
+        app.state.vectorstore,
+        app.state.llm,
+        last_message
+    )
 
-        return {"response": response}
-
-    except Exception as e:
-        print("❌ CHAT ERROR:", str(e))
-        return {"response": "Something went wrong"}
-
+    return {"output": response}
 
 # ✅ RETELL WEBHOOK (FIXED)
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request, db: Session = Depends(get_db)):
+
+    # ✅ Handle empty requests (Retell sends them)
+    body = await request.body()
+    if not body:
+        return {"status": "ignored"}
+
+    # ✅ Safe JSON parsing
     try:
-        body = await request.body()
-
-        # 🛑 Ignore empty requests
-        if not body:
-            return {"status": "ignored_empty"}
-
-        try:
-            data = await request.json()
-        except Exception:
-            return {"status": "not_json"}
-
-        print("🔥 FULL DATA:", data)
-
-        # 🛑 Ignore non-response events
-        event = data.get("event")
-        if event in ["call_started", "call_ended", "call_analyzed"]:
-            return {"status": f"ignored_{event}"}
-
-        # -------------------------------
-        # ✅ EXTRACT USER TEXT
-        # -------------------------------
-        messages = data.get("messages", [])
-        user_text = None
-
-        # Try from messages
-        if messages:
-            for msg in reversed(messages):
-                if msg.get("role") == "user":
-                    user_text = msg.get("content")
-                    break
-
-        # 🔥 Fallback from transcript
-        if not user_text:
-            transcript = data.get("call", {}).get("transcript", "")
-            if "User:" in transcript:
-                user_text = transcript.split("User:")[-1].strip()
-
-        if not user_text:
-            return {
-                "choices": [
-                    {"message": {"content": "Can you repeat that?"}}
-                ]
-            }
-
-        user_text = user_text.lower().strip()
-        print("🧠 USER:", user_text)
-
-        call_id = data.get("call", {}).get("call_id", "default")
-
-        # -------------------------------
-        # 🔥 REDIS HISTORY
-        # -------------------------------
-        history = get_history(call_id)
-
-        # -------------------------------
-        # ✅ DOCTOR QUERY
-        # -------------------------------
-        if any(word in user_text for word in ["doctor", "doctors", "available", "appointment"]):
-            doctors = db.query(Doctor).all()
-
-            if not doctors:
-                response = "No doctors are available right now."
-            else:
-                response = "Here are available doctors:\n" + "\n".join([
-                    f"{d.name} - {d.specialization}"
-                    for d in doctors
-                ])
-
-        # -------------------------------
-        # ✅ AI RESPONSE (RAG)
-        # -------------------------------
-        else:
-            response = ask_question_for_voice(
-                app.state.vectorstore,
-                app.state.llm,
-                user_text,
-                history
-            )
-
-        # -------------------------------
-        # 🔥 SAVE HISTORY
-        # -------------------------------
-        append_message(call_id, "user", user_text)
-        append_message(call_id, "assistant", response)
-
-        # -------------------------------
-        # ✅ RETELL RESPONSE FORMAT
-        # -------------------------------
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "content": response
-                    }
-                }
-            ]
-        }
-
+        data = await request.json()
     except Exception as e:
-        print("❌ WEBHOOK ERROR:", str(e))
+        print("❌ JSON ERROR:", e)
+        return {"status": "ignored"}
 
-        return {
-            "choices": [
-                {
-                    "message": {
-                        "content": "Sorry, something went wrong."
-                    }
-                }
-            ]
-        }
+    print("🔥 FULL DATA:", data)
+
+    # ✅ Only handle analyzed calls
+    if data.get("event") == "call_analyzed":
+        call = data.get("call", {})
+
+        call_id = call.get("call_id")
+        transcript = call.get("transcript", "")
+        summary = call.get("call_analysis", {}).get("call_summary", "")
+
+        print("📞 Call ID:", call_id)
+
+        # ✅ STEP 1: Check if session exists
+        session = db.query(CallSession).filter_by(call_id=call_id).first()
+
+        if not session:
+            # ✅ Create new session
+            session = CallSession(
+                call_id=call_id,
+                status="completed",
+                conversation_history=[]
+            )
+            db.add(session)
+            db.commit()
+            db.refresh(session)
+
+        # ✅ STEP 2: Save transcript
+        try:
+            history = session.conversation_history or []
+
+            history.append({
+                "transcript": transcript,
+                "summary": summary,
+                "timestamp": datetime.utcnow().isoformat()
+            })
+
+            session.conversation_history = history
+            session.status = "completed"
+
+            db.commit()
+
+            print("✅ Conversation saved")
+
+        except Exception as db_error:
+            print("❌ DB ERROR:", db_error)
+            db.rollback()
+
+        # ✅ STEP 3: (Optional) detect booking
+        try:
+            if "appointment is confirmed" in transcript.lower():
+                session.booking_stage = "confirmed"
+                session.appointment_time = "5-6 PM"  # later dynamic
+                db.commit()
+
+                print("✅ Booking updated")
+
+        except Exception as e:
+            print("❌ Booking ERROR:", e)
+            db.rollback()
+
+    return {"status": "ok"}
 @app.post("/ask")
 async def ask(body: QuestionRequest):
     query = body.text or body.question
