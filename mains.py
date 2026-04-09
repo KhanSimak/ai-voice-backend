@@ -139,40 +139,48 @@ def root():
 async def chat(request: Request, db: Session = Depends(get_db)):
     try:
         data = await request.json()
-    except:
-        return {"output": "Sorry, I didn’t understand."}
+        print("📩 VAPI DATA:", data)
+    except Exception as e:
+        print("❌ JSON ERROR:", e)
+        return {"output": "Error reading input"}
 
-    # ✅ Vapi sends messages array
     messages = data.get("messages", [])
 
     if not messages:
+        print("⚠️ No messages received")
         return {"output": "Hello, how can I help you?"}
 
-    # Get last user message
     last_message = messages[-1].get("content", "").lower()
+    print("🧠 USER SAID:", last_message)
 
     if not last_message:
         return {"output": "Can you repeat that?"}
 
-    # ✅ Doctor query
+    # Doctor logic
     if "doctor" in last_message:
         doctors = db.query(Doctor).all()
+
+        if not doctors:
+            return {"output": "No doctors available right now"}
 
         response = "\n".join([
             f"{d.name} - {d.specialization}"
             for d in doctors
         ])
 
+        print("✅ RESPONSE:", response)
         return {"output": response}
 
-    # ✅ Fallback AI
+    # Fallback
     response = ask_question_for_voice(
         app.state.vectorstore,
         app.state.llm,
         last_message
     )
 
-    return {"output": response}
+    print("🤖 AI RESPONSE:", response)
+
+    return {"output": response or "Sorry, I didn’t understand"}
 
 # ✅ RETELL WEBHOOK (FIXED)
 @app.post("/retell-webhook")
