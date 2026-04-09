@@ -15,13 +15,16 @@ from database import engine, SessionLocal, Base
 from models import Doctor, Appointment, CallSession
 
 from redis_client import get_history, append_message, r
-from rag import create_vectorstore, get_llm
+from rag import create_vectorstore, get_llm, ask_question
 
 from dotenv import load_dotenv
 
 # ---------------- ENV ---------------- #
 load_dotenv()
-load_dotenv(override=True)
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise ValueError("❌ DATABASE_URL is not set")
 
 # ---------------- DB ---------------- #
 def get_db():
@@ -79,35 +82,25 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- INTENT DETECTION ---------------- #
-def detect_intent(message: str):
+# ---------------- SCHEMAS ---------------- #
+class QuestionRequest(BaseModel):
+    text: Optional[str] = None
+    question: Optional[str] = None
+
+# ---------------- SIMPLE AI ---------------- #
+def generate_followup_ai(message: str):
     msg = message.lower()
 
-    if any(x in msg for x in ["bye", "thank", "thanks"]):
-        return "exit"
-    if "book" in msg or "appointment" in msg:
-        return "booking"
+    if any(x in msg for x in ["thank", "thanks", "bye"]):
+        return "You're welcome! Have a great day 😊"
+
     if "doctor" in msg or "available" in msg:
-        return "doctor_query"
+        return "We have doctors available today. Which specialization do you need?"
 
-    return "unknown"
+    if "book" in msg or "appointment" in msg:
+        return "Sure, which doctor would you like to book?"
 
-# ---------------- DOCTOR HANDLER ---------------- #
-def get_doctors_response(db: Session):
-    doctors = db.query(Doctor).all()
-
-    if not doctors:
-        return "No doctors available today."
-
-    response = "Here are available doctors:\n"
-    for d in doctors:
-        response += f"{d.name}, {d.specialization}. "
-
-    return response
-
-# ---------------- BOOKING HANDLER ---------------- #
-def handle_booking(message, history):
-    return "Sure, please tell me the doctor's name you want to book."
+    return "Could you please clarify?"
 
 # ---------------- RAG ---------------- #
 def ask_question_for_voice(vectorstore, llm, query, history=None):
@@ -115,13 +108,11 @@ def ask_question_for_voice(vectorstore, llm, query, history=None):
         retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
         docs = retriever.invoke(query)
 
-        context = "\n".join([d.page_content for d in docs]) or ""
+        context = "\n\n".join([d.page_content for d in docs]) or "No relevant info"
 
         prompt = f"""
-You are a smart medical voice assistant.
-
-Answer shortly (max 2 lines).
-Use context if relevant.
+You are a medical voice assistant.
+Answer shortly (2 lines max).
 
 Context:
 {context}
@@ -142,87 +133,81 @@ User:
 async def chat(request: Request, db: Session = Depends(get_db)):
     try:
         data = await request.json()
-        print("📩 VAPI:", data)
+        print("📩 VAPI DATA:", data)
 
-        messages = data.get("message", {}).get("artifact", {}).get("messages", [])
+        message_data = data.get("message", {})
 
-        if not messages:
-            return JSONResponse({"response": "Sorry, I didn’t understand that."})
-
+        # Extract messages
+        messages = message_data.get("artifact", {}).get("messages", [])
         last_user_message = None
-        for msg in reversed(messages):
-            if msg.get("role") == "user":
-                last_user_message = msg.get("message")
-                break
+
+        if messages:
+            for msg in reversed(messages):
+                if msg.get("role") == "user":
+                    last_user_message = msg.get("message")
+                    break
+
+        # Fallback: transcript
+        if not last_user_message:
+            last_user_message = message_data.get("transcript")
 
         if not last_user_message:
-            return JSONResponse({"response": "Please repeat."})
+            return JSONResponse({"response": "Could you please repeat?"})
 
         print("👤 USER:", last_user_message)
 
-        # Redis memory
-        call_id = data.get("message", {}).get("call", {}).get("id", "default")
-        history = get_history(call_id)
+        # Call ID (robust)
+        call_id = (
+            message_data.get("call", {}).get("id")
+            or data.get("call", {}).get("id")
+            or "default"
+        )
 
+        # Redis memory
+        history = get_history(call_id)
         append_message(call_id, "user", last_user_message)
 
-        # Intent detection
-        intent = detect_intent(last_user_message)
+        # AI response
+        ai_reply = ask_question_for_voice(
+            app.state.vectorstore,
+            app.state.llm,
+            last_user_message,
+            history
+        )
 
-        # Intent routing
-        if intent == "exit":
-            reply = "You're welcome! Have a great day 😊"
+        if not ai_reply:
+            ai_reply = generate_followup_ai(last_user_message)
 
-        elif intent == "doctor_query":
-            reply = get_doctors_response(db)
+        append_message(call_id, "assistant", ai_reply)
 
-        elif intent == "booking":
-            reply = handle_booking(last_user_message, history)
+        print("🤖 AI:", ai_reply)
 
-        else:
-            # RAG fallback
-            reply = ask_question_for_voice(
-                app.state.vectorstore,
-                app.state.llm,
-                last_user_message,
-                history
-            )
-
-            if not reply:
-                reply = "Could you please clarify?"
-
-        append_message(call_id, "assistant", reply)
-
-        print("🤖 AI:", reply)
-
-        return JSONResponse({"response": reply})
+        return JSONResponse({"response": ai_reply})
 
     except Exception as e:
         print("❌ ERROR:", str(e))
         return JSONResponse({"response": "Something went wrong"})
-
 # ---------------- RETELL WEBHOOK ---------------- #
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request, db: Session = Depends(get_db)):
-    body = await request.body()
-    if not body:
-        return {"status": "ignored"}
-
     try:
         data = await request.json()
-    except:
-        return {"status": "ignored"}
 
-    if data.get("event") == "call_analyzed":
+        if data.get("event") != "call_analyzed":
+            return {"status": "ignored"}
+
         call = data.get("call", {})
         call_id = call.get("id")
         transcript = call.get("transcript", "")
-        summary = call.get("call_analysis", {}).get("call_summary", "")
 
         session = db.query(CallSession).filter_by(call_id=call_id).first()
 
         if not session:
-            session = CallSession(call_id=call_id, status="completed", conversation_history=[])
+            session = CallSession(
+                call_id=call_id,
+                status="completed",
+                conversation_history=[]
+            )
             db.add(session)
             db.commit()
             db.refresh(session)
@@ -231,20 +216,22 @@ async def retell_webhook(request: Request, db: Session = Depends(get_db)):
 
         history.append({
             "transcript": transcript,
-            "summary": summary,
             "timestamp": datetime.utcnow().isoformat()
         })
 
         session.conversation_history = history
-        session.status = "completed"
         db.commit()
 
-    return {"status": "ok"}
+        return {"status": "saved"}
+
+    except Exception as e:
+        print("❌ ERROR:", e)
+        return {"status": "error"}
 
 # ---------------- TEST ---------------- #
 @app.get("/test-db")
 def test_db(db: Session = Depends(get_db)):
-    return {"doctors": db.query(Doctor).count()}
+    return {"count": db.query(Doctor).count()}
 
 # ---------------- RUN ---------------- #
 if __name__ == "__main__":
