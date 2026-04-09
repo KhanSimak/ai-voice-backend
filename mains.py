@@ -182,7 +182,7 @@ async def chat(request: Request, db: Session = Depends(get_db)):
 
     return {"output": response or "Sorry, I didn’t understand"}
 
-# ✅ RETELL WEBHOOK (FIXED)
+# ✅ RETELL WEBHOOK (FIXEDsss
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request, db: Session = Depends(get_db)):
 
