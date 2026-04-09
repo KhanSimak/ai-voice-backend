@@ -135,53 +135,46 @@ def root():
     return {"status": "ok"}
 
 # ✅ SAFE CHAT ENDPOINT
+
+
 @app.post("/chat")
-async def chat(request: Request, db: Session = Depends(get_db)):
+async def chat(request: Request):
+    data = await request.json()
+
+    print("📩 VAPI DATA:", data)
+
     try:
-        data = await request.json()
-        print("📩 VAPI DATA:", data)
+        # ✅ CORRECT PATH
+        messages = data.get("message", {}).get("artifact", {}).get("messages", [])
+
+        if not messages:
+            print("⚠️ No messages received")
+            return JSONResponse({"response": "Sorry, I didn’t understand that."})
+
+        # ✅ Get last user message
+        last_user_message = None
+        for msg in reversed(messages):
+            if msg.get("role") == "user":
+                last_user_message = msg.get("message")
+                break
+
+        if not last_user_message:
+            return JSONResponse({"response": "Can you please repeat?"})
+
+        print("👤 USER:", last_user_message)
+
+        # 🔥 Your existing AI logic here (DO NOT CHANGE)
+        ai_reply = generate_followup_ai(last_user_message)
+
+        print("🤖 AI:", ai_reply)
+
+        return JSONResponse({
+            "response": ai_reply
+        })
+
     except Exception as e:
-        print("❌ JSON ERROR:", e)
-        return {"output": "Error reading input"}
-
-    messages = data.get("messages", [])
-
-    if not messages:
-        print("⚠️ No messages received")
-        return {"output": "Hello, how can I help you?"}
-
-    last_message = messages[-1].get("content", "").lower()
-    print("🧠 USER SAID:", last_message)
-
-    if not last_message:
-        return {"output": "Can you repeat that?"}
-
-    # Doctor logic
-    if "doctor" in last_message:
-        doctors = db.query(Doctor).all()
-
-        if not doctors:
-            return {"output": "No doctors available right now"}
-
-        response = "\n".join([
-            f"{d.name} - {d.specialization}"
-            for d in doctors
-        ])
-
-        print("✅ RESPONSE:", response)
-        return {"output": response}
-
-    # Fallback
-    response = ask_question_for_voice(
-        app.state.vectorstore,
-        app.state.llm,
-        last_message
-    )
-
-    print("🤖 AI RESPONSE:", response)
-
-    return {"output": response or "Sorry, I didn’t understand"}
-
+        print("❌ ERROR:", str(e))
+        return JSONResponse({"response": "Something went wrong"})
 # ✅ RETELL WEBHOOK (FIXEDsssss
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request, db: Session = Depends(get_db)):
