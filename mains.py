@@ -15,7 +15,9 @@ app = FastAPI(title="Retell AI Voice Agent")
 # Replace with your real RAG
 # ---------------------------------------------------------------------------
 def rag_query(query: str) -> str:
-    raise NotImplementedError("Implement rag_query() with your RAG pipeline.")
+    return """Dr. Sharma - Cardiologist
+    Dr. Khan - Dentist
+    Dr. Patel - General Physician"""
 
 
 # ---------------------------------------------------------------------------
