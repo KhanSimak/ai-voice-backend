@@ -133,28 +133,10 @@ User:
 async def chat(request: Request):
     data = await request.json()
 
-    messages = data.get("message", {}).get("artifact", {}).get("messagesOpenAIFormatted", [])
+    print("RAW:", data)
 
-    user_msg = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            user_msg = m.get("content", "")
-            break
-
-    print("USER:", user_msg)
-
-    # SIMPLE RESPONSE TEST
-    if user_msg:
-        msg = f"You said: {user_msg}"
-    else:
-        msg = "I didn't hear you properly."
-
-    # 🔥 IMPORTANT: VAPI SAFE FORMAT
     return {
-        "message": {
-            "role": "assistant",
-            "content": msg
-        }
+        "result": "BACKEND IS WORKING"
     }
 
 def get_doctors_from_db(db):
