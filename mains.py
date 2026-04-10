@@ -109,8 +109,19 @@ def extract_user_message(data: dict):
     )
 
 
-def generate_followup_ai(message: str):
-    msg = message.lower()
+def safe_text(x):
+    if isinstance(x, str):
+        return x
+    if isinstance(x, dict):
+        return x.get("message") or x.get("content") or ""
+    return ""
+
+
+def generate_followup_ai(message):
+    msg = safe_text(message).lower()
+
+    if not msg:
+        return "I didn't understand that."
 
     if any(x in msg for x in ["thank", "thanks", "bye"]):
         return "You're welcome! Have a great day 😊"
@@ -122,7 +133,6 @@ def generate_followup_ai(message: str):
         return "Sure, which doctor would you like to book?"
 
     return "Could you please clarify?"
-
 # ---------------- CHAT ENDPOINT ---------------- #
 
 @app.post("/chat")
