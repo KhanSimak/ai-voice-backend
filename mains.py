@@ -32,13 +32,15 @@ FALLBACK_NO_DATA = "No doctors found right now."
 # Helpers
 # ---------------------------------------------------------------------------
 def _extract_message(body: dict) -> str | None:
-    # 1. Direct fields (fallback)
+    # 1. Direct message (if Retell sends it)
     msg = body.get("message") or body.get("text") or body.get("query")
     if msg:
         return msg.strip()
 
-    # 2. Retell transcript_object (MAIN FIX)
-    transcript = body.get("transcript_object", [])
+    # 2. Handle Retell call object
+    call = body.get("call", {})
+    transcript = call.get("transcript_object", [])
+
     user_messages = [
         item.get("content", "").strip()
         for item in transcript
@@ -46,7 +48,7 @@ def _extract_message(body: dict) -> str | None:
     ]
 
     if user_messages:
-        return user_messages[-1]  # latest user message
+        return user_messages[-1]
 
     return None
 
