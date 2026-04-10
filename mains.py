@@ -128,7 +128,7 @@ User:
         print("RAG ERROR:", e)
         return None
 
-# ---------------- CHAT ---------------- #
+# ---------------- CHAT ---------------#
 @app.post("/chat")
 async def chat(request: Request):
     data = await request.json()
