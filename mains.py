@@ -32,23 +32,19 @@ FALLBACK_NO_DATA = "No doctors found right now."
 # Helpers
 # ---------------------------------------------------------------------------
 def _extract_message(body: dict) -> str | None:
-    # 1. Direct message (if Retell sends it)
-    msg = body.get("message") or body.get("text") or body.get("query")
-    if msg:
-        return msg.strip()
+    # Normal case
+    if "message" in body:
+        return body["message"]
 
-    # 2. Handle Retell call object
-    call = body.get("call", {})
-    transcript = call.get("transcript_object", [])
+    # Retell case
+    if "call" in body and "transcript" in body["call"]:
+        transcript = body["call"]["transcript"]
 
-    user_messages = [
-        item.get("content", "").strip()
-        for item in transcript
-        if item.get("role") == "user"
-    ]
-
-    if user_messages:
-        return user_messages[-1]
+        # get last user line
+        lines = transcript.split("\n")
+        for line in reversed(lines):
+            if line.lower().startswith("user:"):
+                return line.replace("User:", "").strip()
 
     return None
 
@@ -58,6 +54,20 @@ def _sanitize_rag_response(rag_response: str) -> str:
         return FALLBACK_NO_DATA
     return ", ".join(lines[:2])
 
+
+def _build_rag_prompt(user_text: str) -> str:
+    lower = user_text.lower()
+
+    if user_text.lower() in {"name", "data", "list", "show", "give"}:
+        return "List all available doctors."
+
+    if "doctor" in lower:
+        return f"List doctors: {user_text}"
+
+    if "only" in lower or "just" in lower:
+        return f"Filter doctors: {user_text}"
+
+    return user_text
 
 # ---------------------------------------------------------------------------
 # Endpoint
@@ -75,9 +85,9 @@ async def chat(request: Request):
         body = {}
 
     logger.info(f"Request: {body}")
-
+    
     user_message = _extract_message(body)
-
+    
     if not user_message:
         return {"message": FALLBACK_EMPTY}
 
