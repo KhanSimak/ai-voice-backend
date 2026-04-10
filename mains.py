@@ -42,16 +42,33 @@ async def chat(request: Request):
 
     print("RAW DATA:", data)
 
-    # ✅ HANDLE ALL FORMATS (Retell function + webhook)
-    user_message = (
-        data.get("query") or
-        data.get("transcript") or
-        data.get("message") or
-        ""
-    )
+    user_message = ""
+
+    # ✅ CASE 1: Normal function call
+    if "query" in data and isinstance(data["query"], str):
+        user_message = data["query"]
+
+    # ✅ CASE 2: Sometimes Retell sends stringified JSON
+    elif "query" in data and isinstance(data["query"], dict):
+        user_message = data["query"].get("query", "")
+
+    # ✅ CASE 3: fallback formats
+    if not user_message:
+        user_message = (
+            data.get("transcript") or
+            data.get("message") or
+            data.get("text") or
+            ""
+        )
+
+    # ✅ CLEAN STRING (VERY IMPORTANT)
+    if isinstance(user_message, dict):
+        user_message = str(user_message)
+
+    user_message = user_message.strip()
 
     if not user_message:
-        return {"message": "No input received"}
+        return {"message": "Sorry, I didn't catch that."}
 
     print("USER:", user_message)
 
@@ -71,7 +88,6 @@ async def chat(request: Request):
         answer = "There was an error processing your request."
 
     return {"message": answer}
-
 
 # ---------------- ROOT ---------------- #
 @app.get("/")
