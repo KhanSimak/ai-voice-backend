@@ -131,40 +131,29 @@ User:
 # ---------------- CHAT ---------------- #
 @app.post("/chat")
 async def chat(request: Request):
-    try:
-        data = await request.json()
+    data = await request.json()
 
-        messages = data.get("message", {}).get("artifact", {}).get("messagesOpenAIFormatted", [])
+    messages = data.get("message", {}).get("artifact", {}).get("messagesOpenAIFormatted", [])
 
-        user_msg = ""
-        for m in reversed(messages):
-            if m.get("role") == "user":
-                user_msg = m.get("content", "")
-                break
+    user_msg = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_msg = m.get("content", "")
+            break
 
-        print("USER:", user_msg)
+    print("USER:", user_msg)
 
-        # ✅ ALWAYS initialize
-        msg = "Sorry, I didn't understand."
+    if "clinic" in user_msg.lower():
+        msg = "Our clinic is City Care Clinic, located in Mumbai."
+    else:
+        msg = "I can help you with clinic info or doctor details."
 
-        # 🔥 YOUR LOGIC
-        if "doctor" in user_msg.lower() or "name" in user_msg.lower():
-            msg = """We have:
-- Dr Ayesha Qureshi – Dermatologist
-- Dr Sameer Kulkarni – ENT Specialist
-- Dr Pooja Nair – Diabetologist
-
-Would you like to book an appointment?"""
-
-        return {
-            "reply": msg
+    return {
+        "message": {
+            "role": "assistant",
+            "content": msg
         }
-
-    except Exception as e:
-        print("❌ ERROR:", e)
-        return {
-            "reply": "Sorry, something went wrong. Please try again."
-        }
+    }
     
 
 def get_doctors_from_db(db):
