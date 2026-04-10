@@ -130,72 +130,41 @@ User:
 
 # ---------------- CHAT ---------------- #
 @app.post("/chat")
-async def chat(request: Request, db: Session = Depends(get_db)):
+async def chat(request: Request):
     try:
         data = await request.json()
-        print("📩 VAPI DATA:", data)
 
-        message_data = data.get("message", {})
-
-        # Extract messages
         messages = data.get("message", {}).get("artifact", {}).get("messagesOpenAIFormatted", [])
-        last_user_message = msg.get("content")
 
-        if messages:
-            for msg in reversed(messages):
-                if msg.get("role") == "user":
-                    last_user_message = msg.get("message")
-                    break
+        user_msg = ""
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                user_msg = m.get("content", "")
+                break
 
-        # Fallback: transcript
-        if not last_user_message:
-            last_user_message = message_data.get("transcript")
+        print("USER:", user_msg)
 
-        if not last_user_message:
-            return JSONResponse({"response": "Could you please repeat?"})
+        # ✅ ALWAYS initialize
+        msg = "Sorry, I didn't understand."
 
-        print("👤 USER:", last_user_message)
+        # 🔥 YOUR LOGIC
+        if "doctor" in user_msg.lower() or "name" in user_msg.lower():
+            msg = """We have:
+- Dr Ayesha Qureshi – Dermatologist
+- Dr Sameer Kulkarni – ENT Specialist
+- Dr Pooja Nair – Diabetologist
 
-        # Call ID (robust)
-        call_id = (
-            message_data.get("call", {}).get("id")
-            or data.get("call", {}).get("id")
-            or "default"
-        )
+Would you like to book an appointment?"""
 
-        # Redis memory
-        history = get_history(call_id)
-        append_message(call_id, "user", last_user_message)
-
-        # AI response
-        ai_reply = ask_question_for_voice(
-            app.state.vectorstore,
-            app.state.llm,
-            last_user_message,
-            history
-        )
-
-        if not ai_reply:
-            ai_reply = generate_followup_ai(last_user_message)
-
-        append_message(call_id, "assistant", ai_reply)
-        
-        if "doctor" in last_user_message:
-           ai_reply = get_doctors_from_db(db)
-        else:
-          ai_reply = ask_question_for_voice(
-          app.state.vectorstore,
-          app.state.llm,
-          last_user_message
-        ) 
-
-        print("🤖 AI:", ai_reply)
-
-        return JSONResponse({"response": ai_reply})
+        return {
+            "reply": msg
+        }
 
     except Exception as e:
-        print("❌ ERROR:", str(e))
-        return JSONResponse({"response": "Something went wrong"})
+        print("❌ ERROR:", e)
+        return {
+            "reply": "Sorry, something went wrong. Please try again."
+        }
     
 
 def get_doctors_from_db(db):
