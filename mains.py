@@ -143,18 +143,14 @@ async def chat(request: Request):
 
     print("USER:", user_msg)
 
-    if "clinic" in user_msg.lower():
-        msg = "Our clinic is City Care Clinic, located in Mumbai."
+    if "doctor" in user_msg.lower():
+        msg = "Dr Ayesha Qureshi, Dr Sameer Kulkarni, Dr Pooja Nair are available."
     else:
-        msg = "I can help you with clinic info or doctor details."
+        msg = "I can help you with doctors and clinic information."
 
     return {
-        "message": {
-            "role": "assistant",
-            "content": msg
-        }
+        "message": msg
     }
-    
 
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
