@@ -42,33 +42,27 @@ async def chat(request: Request):
 
     print("RAW DATA:", data)
 
-    user_message = ""
+    # ✅ FIXED: handle ALL formats including Retell function call
+    user_message = (
+        data.get("query") or          # ✅ THIS WAS MISSING
+        data.get("message") or
+        data.get("text") or
+        data.get("transcript")
+    )
 
-    # ✅ CASE 1: Normal function call
-    if "query" in data and isinstance(data["query"], str):
-        user_message = data["query"]
-
-    # ✅ CASE 2: Sometimes Retell sends stringified JSON
-    elif "query" in data and isinstance(data["query"], dict):
-        user_message = data["query"].get("query", "")
-
-    # ✅ CASE 3: fallback formats
+    # fallback (if nested)
     if not user_message:
-        user_message = (
-            data.get("transcript") or
-            data.get("message") or
-            data.get("text") or
-            ""
-        )
-
-    # ✅ CLEAN STRING (VERY IMPORTANT)
-    if isinstance(user_message, dict):
-        user_message = str(user_message)
-
-    user_message = user_message.strip()
+        try:
+            msgs = data.get("artifact", {}).get("messages", [])
+            for m in reversed(msgs):
+                if m.get("role") == "user":
+                    user_message = m.get("message") or m.get("content")
+                    break
+        except:
+            pass
 
     if not user_message:
-        return {"message": "Sorry, I didn't catch that."}
+        return {"message": "Sorry, I didn’t catch that."}
 
     print("USER:", user_message)
 
@@ -81,7 +75,7 @@ async def chat(request: Request):
         )
 
         if not answer:
-            answer = "Sorry, I couldn't find that information."
+            answer = "I couldn't find that information."
 
     except Exception as e:
         print("RAG ERROR:", e)
