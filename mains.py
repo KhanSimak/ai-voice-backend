@@ -4,7 +4,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import Optional
 from datetime import datetime
-
+from typing import Optional, Any
 from fastapi import Request, FastAPI, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -143,27 +143,55 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-from fastapi import Request
 
+app = FastAPI()
+
+# -------- REQUEST MODEL (VAPI SAFE) --------
+class ChatRequest(BaseModel):
+    message: Optional[str] = None
+    input: Optional[str] = None
+    text: Optional[str] = None
+    data: Optional[Any] = None
+
+
+# -------- MAIN CHAT ENDPOINT --------
 @app.post("/chat")
-async def chat(request: Request):
+async def chat(payload: ChatRequest):
     try:
-        body = await request.body()
+        # 1. Extract message safely from ALL possible sources
+        user_message = (
+            payload.message
+            or payload.input
+            or payload.text
+        )
 
-        if not body:
-            return {"response": "No input received"}
+        # Handle nested Make.com / VAPI structures
+        if not user_message and isinstance(payload.data, dict):
+            user_message = (
+                payload.data.get("message")
+                or payload.data.get("input")
+                or payload.data.get("text")
+            )
 
-        data = await request.json()
+        # 2. Safety check (NO EMPTY INPUT CRASHES)
+        if not user_message:
+            return {
+                "message": "No input received"
+            }
+
+        # 3. YOUR LOGIC GOES HERE (DB / AI / rules)
+        response = f"Backend working: {user_message}"
+
+        # 4. ALWAYS return VAPI-compatible format
+        return {
+            "message": response
+        }
 
     except Exception as e:
-        return {"response": f"Invalid request: {str(e)}"}
-
-    user_message = data.get("message", "")
-
-    return {
-        "message": f"You said: {user_message}"
-    }
-    
+        # NEVER crash endpoint (prevents VAPI retry loops)
+        return {
+            "message": f"Server error handled safely: {str(e)}"
+        }    
 
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
