@@ -148,9 +148,9 @@ async def chat(request: Request):
     else:
         msg = "I can help you with doctors and clinic information."
 
-    return {
-        "message": msg
-    }
+    return {"message": "BACKEND WORKING"}
+
+
 
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
