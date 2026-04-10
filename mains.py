@@ -143,32 +143,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+from fastapi import Request
+
 @app.post("/chat")
 async def chat(request: Request):
     try:
         body = await request.body()
 
-        # If empty request
         if not body:
-            return {"reply": "No input received"}
+            return {"response": "No input received"}
 
-        text = body.decode("utf-8")
-
-        # Try JSON parsing safely
-        try:
-            data = await request.json()
-            user_message = data.get("message", "")
-        except:
-            user_message = text  # fallback raw text
+        data = await request.json()
 
     except Exception as e:
-        return {"reply": f"Error: {str(e)}"}
+        return {"response": f"Invalid request: {str(e)}"}
 
-    print("USER:", user_message)
+    user_message = data.get("message", "")
 
     return {
-        "reply": f"You said: {user_message}"
+        "message": f"You said: {user_message}"
     }
+    
 
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
