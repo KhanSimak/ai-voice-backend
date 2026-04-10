@@ -1,94 +1,47 @@
-import uvicorn
 from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-from contextlib import asynccontextmanager
-import logging
+import uvicorn
 
-from rag import create_vectorstore, get_llm, ask_question
+app = FastAPI()
 
-# ---------------- LOGGING ---------------- #
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
-
-# ---------------- STARTUP ---------------- #
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    logger.info("Starting up...")
-
-    app.state.vectorstore = create_vectorstore()
-    app.state.llm = get_llm()
-
-    yield
-
-    logger.info("Shutting down...")
-
-# ---------------- APP ---------------- #
-app = FastAPI(lifespan=lifespan)
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-# ---------------- CHAT ENDPOINT ---------------- #
 @app.post("/chat")
 async def chat(request: Request):
-    try:
-        data = await request.json()
-    except Exception:
-        data = {}
+    data = await request.json()
 
-    print("RAW DATA:", data)
+    print("🔥 RAW DATA:", data)
 
-    # ✅ FIXED: handle ALL formats including Retell function call
-    user_message = (
-        data.get("query") or          # ✅ THIS WAS MISSING
-        data.get("message") or
-        data.get("text") or
-        data.get("transcript")
-    )
+    # Extract query safely
+    query = data.get("query")
 
-    # fallback (if nested)
-    if not user_message:
-        try:
-            msgs = data.get("artifact", {}).get("messages", [])
-            for m in reversed(msgs):
-                if m.get("role") == "user":
-                    user_message = m.get("message") or m.get("content")
-                    break
-        except:
-            pass
+    # Fallback if query not present (IMPORTANT FIX)
+    if not query:
+        # Sometimes Retell sends empty {}
+        # Try alternative keys
+        query = data.get("message") or data.get("input") or ""
 
-    if not user_message:
-        return {"message": "Sorry, I didn’t catch that."}
+    if not query:
+        return {"message": "No input received"}
 
-    print("USER:", user_message)
+    # Your actual logic here
+    response = handle_query(query)
 
-    # ✅ RAG CALL
-    try:
-        answer = ask_question(
-            request.app.state.vectorstore,
-            request.app.state.llm,
-            user_message
-        )
-
-        if not answer:
-            answer = "I couldn't find that information."
-
-    except Exception as e:
-        print("RAG ERROR:", e)
-        answer = "There was an error processing your request."
-
-    return {"message": answer}
-
-# ---------------- ROOT ---------------- #
-@app.get("/")
-def home():
-    return {"status": "running"}
+    return {"message": response}
 
 
-# ---------------- RUN ---------------- #
+def handle_query(query: str):
+    query = query.lower()
+
+    if "doctor" in query:
+        return "We have general physicians, dentists, and cardiologists available. Which one do you need?"
+
+    elif "book" in query:
+        return "Sure, please tell me your preferred time and doctor."
+
+    elif "hello" in query:
+        return "Hello! How can I help you today?"
+
+    else:
+        return f"I understood: {query}. Can you please clarify more?"
+
+
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8000)
