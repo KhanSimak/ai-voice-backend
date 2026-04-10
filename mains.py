@@ -95,24 +95,27 @@ async def startup_event():
 async def chat(request: Request):
     try:
         body = await request.json()
+        logger.info(f"📩 FULL BODY: {body}")
 
         user_message = body.get("message", "").strip()
 
         if not user_message:
+            user_message = body.get("transcript", "")
+
+        logger.info(f"👤 USER: {user_message}")
+
+        if not user_message:
             return {"message": "Please say something."}
 
-        logger.info(f"User: {user_message}")
-
-        # 🔥 RAG CALL
         answer = ask_question(vectorstore, llm, user_message)
 
-        logger.info(f"AI: {answer}")
+        logger.info(f"🤖 AI: {answer}")
 
         return {"message": answer}
 
     except Exception as e:
-        logger.error(f"Chat error: {str(e)}")
-        return {"message": "Something went wrong. Please try again."}
+        logger.error(f"❌ ERROR: {str(e)}")
+        return {"message": "Error occurred"}
 # ---------------------------------------------------------------------------
 # Health
 # ---------------------------------------------------------------------------

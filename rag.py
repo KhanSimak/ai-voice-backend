@@ -48,8 +48,9 @@ def create_vectorstore():
     logger.info(f"Created {len(chunks)} chunks.")
     
     embeddings = GoogleGenerativeAIEmbeddings(
-    model="models/gemini-embedding-001",
-    task_type="retrieval_document"
+      model="models/gemini-embedding-001",
+      google_api_key=google_api_key
+)
 )
     google_api_key=os.getenv("GOOGLE_API_KEY")
 
@@ -79,39 +80,67 @@ def get_llm():
 def ask_question(vectorstore, llm, question: str) -> str:
     """
     Retrieves relevant chunks from the vectorstore and sends them
-    along with the question to the LLM. Returns the answer string.
+    along with the question to the LLM.
     """
-    if not question or not question.strip():
-        return "Please provide a valid question."
 
-    docs = vectorstore.similarity_search(question.strip(), k=4)
+    if not question or not question.strip():
+        return "Please say something."
+
+    question = question.strip()
+
+    logger.info(f"🧠 RAG QUERY: {question}")
+
+    # 🔍 Step 1: Retrieve docs
+    try:
+        docs = vectorstore.similarity_search(question, k=4)
+    except Exception as e:
+        logger.error(f"❌ Vector search failed: {str(e)}")
+        return "I'm having trouble accessing the knowledge base."
+
+    logger.info(f"🔍 Retrieved {len(docs)} docs")
 
     if not docs:
-        return "I could not find relevant information in the knowledge base to answer your question."
+        logger.warning("⚠️ No docs found in RAG")
+        return "I don't have that information in the knowledge base."
 
+    # 📄 Step 2: Log chunks (important for debugging)
+    for i, doc in enumerate(docs):
+        preview = doc.page_content.strip().replace("\n", " ")[:200]
+        logger.info(f"📄 Doc {i+1}: {preview}")
+
+    # 🧾 Step 3: Build context
     context = "\n\n".join(
-        f"[Page {doc.metadata.get('page', 'N/A')}]\n{doc.page_content.strip()}"
-        for doc in docs
+        f"{doc.page_content.strip()}" for doc in docs
     )
 
-    system_prompt = (
-        "You are a helpful assistant. "
-        "You are a warm, polite clinic receptionist speaking on a phone call. "
-        "Talk naturally like a human, not like a robot. "
-        "Answer the user's question using ONLY the context provided below. "
-        "If the answer is not in the context, say: "
-        "'I don't have that information in the knowledge base.' "
-        "Be concise, accurate, and professional.\n\n"
-        f"CONTEXT:\n{context}"
-    )
+    # 🧠 Step 4: Strong prompt (no hallucination)
+    system_prompt = f"""
+You are a clinic receptionist speaking on a phone call.
 
-    messages = [
-        SystemMessage(content=system_prompt),
-        HumanMessage(content=question.strip()),
-    ]
+Rules:
+- Speak naturally and politely
+- Keep answers short (1–2 sentences)
+- ONLY use the information from the context below
+- If not found, say: "I don't have that information in the knowledge base"
 
-    response = llm.invoke(messages)
+CONTEXT:
+{context}
+"""
 
-    if hasattr(response, "content"):
-        return response.content.strip()
-    return str(response).strip()
+    # 💬 Step 5: LLM call
+    try:
+        response = llm.invoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=question)
+        ])
+    except Exception as e:
+        logger.error(f"❌ LLM failed: {str(e)}")
+        return "I'm having trouble answering right now."
+
+    # 🧾 Step 6: Extract response
+    answer = response.content.strip() if hasattr(response, "content") else str(response).strip()
+
+    logger.info(f"🤖 FINAL ANSWER: {answer}")
+
+    # 🏷️ Optional debug tag (remove later if needed)
+    return f"[RAG] {answer}"
