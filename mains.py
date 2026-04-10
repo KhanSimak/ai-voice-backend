@@ -1,14 +1,16 @@
 import os
 import uvicorn
 import logging
-from contextlib import asynccontextmanager
-from typing import Optional
+import json
 from datetime import datetime
+from contextlib import asynccontextmanager
 from typing import Optional, Any
-from fastapi import Request, FastAPI, Depends
+
+from fastapi import FastAPI, Request, Depends
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+
 from sqlalchemy.orm import Session
 
 from database import engine, SessionLocal, Base
@@ -34,6 +36,7 @@ def get_db():
     finally:
         db.close()
 
+
 def seed_doctors():
     db = SessionLocal()
 
@@ -52,6 +55,7 @@ def seed_doctors():
         db.commit()
 
     db.close()
+
 
 Base.metadata.create_all(bind=engine)
 seed_doctors()
@@ -82,12 +86,29 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# ---------------- SCHEMAS ---------------- #
-class QuestionRequest(BaseModel):
-    text: Optional[str] = None
-    question: Optional[str] = None
+# ---------------- HELPERS ---------------- #
 
-# ---------------- SIMPLE AI ---------------- #
+def extract_user_message(data: dict):
+    """
+    Works with VAPI + Make + raw webhook payloads
+    """
+    try:
+        # VAPI format
+        messages = data.get("message", {}).get("messages", [])
+        for m in reversed(messages):
+            if m.get("role") == "user":
+                return m.get("message") or m.get("content")
+    except:
+        pass
+
+    # fallback formats
+    return (
+        data.get("message")
+        or data.get("input")
+        or data.get("text")
+    )
+
+
 def generate_followup_ai(message: str):
     msg = message.lower()
 
@@ -95,114 +116,50 @@ def generate_followup_ai(message: str):
         return "You're welcome! Have a great day 😊"
 
     if "doctor" in msg or "available" in msg:
-        return "We have doctors available today. Which specialization do you need?"
+        return "We have doctors available. Which specialization do you need?"
 
     if "book" in msg or "appointment" in msg:
         return "Sure, which doctor would you like to book?"
 
     return "Could you please clarify?"
 
-# ---------------- RAG ---------------- #
-def ask_question_for_voice(vectorstore, llm, query, history=None):
-    try:
-        retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
-        docs = retriever.invoke(query)
-
-        context = "\n\n".join([d.page_content for d in docs]) or "No relevant info"
-
-        prompt = f"""
-You are a medical voice assistant.
-Answer shortly (2 lines max).
-
-Context:
-{context}
-
-User:
-{query}
-"""
-
-        res = llm.invoke(prompt)
-        return res.content if hasattr(res, "content") else str(res)
-
-    except Exception as e:
-        print("RAG ERROR:", e)
-        return None
-
-# ---------------- CHAT ---------------#
-
-from fastapi import FastAPI, Request
-from fastapi.middleware.cors import CORSMiddleware
-
-app = FastAPI()
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
-
-app = FastAPI()
-
-# -------- REQUEST MODEL (VAPI SAFE) --------
-
-class ChatRequest(BaseModel):
-    message: Optional[str] = None
-    input: Optional[str] = None
-    text: Optional[str] = None
-    data: Optional[Any] = None
-
+# ---------------- CHAT ENDPOINT ---------------- #
 
 @app.post("/chat")
-async def chat(payload: ChatRequest):
-    # extract safely
-    user_message = (
-        payload.message
-        or payload.input
-        or payload.text
-    )
+async def chat(request: Request):
+    try:
+        body = await request.body()
 
-    if not user_message and isinstance(payload.data, dict):
-        user_message = (
-            payload.data.get("message")
-            or payload.data.get("input")
-            or payload.data.get("text")
-        )
+        if not body:
+            return JSONResponse({"result": "empty request"})
 
-    if not user_message:
-        return {"message": "No input received"}
+        try:
+            data = json.loads(body)
+        except Exception:
+            return JSONResponse({"result": "invalid json"})
 
-    return {
-        "message": f"Backend working: {user_message}"
-    }
+        user_text = extract_user_message(data)
 
-def get_doctors_from_db(db):
-    doctors = db.query(Doctor).all()
-    return "\n".join([f"{d.name} - {d.specialization}" for d in doctors])
+        if not user_text:
+            return JSONResponse({"result": "no user message detected"})
 
-def clean_user_input(text: str) -> str:
-    text = text.lower().strip()
+        print("USER:", user_text)
 
-    # fix common speech mistakes
-    replacements = {
-        "team doctors": "doctors",
-        "doctor name": "doctors",
-        "name doctor": "doctors",
-        "available doctor": "doctors",
-        "octavoids": "orthopedics",
-        "steelock": "doctor",
-    }
+        # SIMPLE AI LOGIC FIRST (stable mode)
+        reply = generate_followup_ai(user_text)
 
-    for k, v in replacements.items():
-        if k in text:
-            return v
+        return JSONResponse({
+            "result": reply
+        })
 
-    return text
-
+    except Exception as e:
+        print("CHAT ERROR:", e)
+        return JSONResponse({
+            "result": "server error"
+        })
 
 # ---------------- RETELL WEBHOOK ---------------- #
+
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request, db: Session = Depends(get_db)):
     try:
@@ -244,10 +201,12 @@ async def retell_webhook(request: Request, db: Session = Depends(get_db)):
         return {"status": "error"}
 
 # ---------------- TEST ---------------- #
+
 @app.get("/test-db")
 def test_db(db: Session = Depends(get_db)):
     return {"count": db.query(Doctor).count()}
 
 # ---------------- RUN ---------------- #
+
 if __name__ == "__main__":
     uvicorn.run("mains:app", host="0.0.0.0", port=8000)
