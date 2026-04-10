@@ -32,23 +32,23 @@ FALLBACK_NO_DATA = "No doctors found right now."
 # Helpers
 # ---------------------------------------------------------------------------
 def _extract_message(body: dict) -> str | None:
-    return (body.get("message") or body.get("text") or "").strip() or None
+    # 1. Direct fields (fallback)
+    msg = body.get("message") or body.get("text") or body.get("query")
+    if msg:
+        return msg.strip()
 
+    # 2. Retell transcript_object (MAIN FIX)
+    transcript = body.get("transcript_object", [])
+    user_messages = [
+        item.get("content", "").strip()
+        for item in transcript
+        if item.get("role") == "user"
+    ]
 
-def _build_rag_prompt(user_text: str) -> str:
-    lower = user_text.lower()
+    if user_messages:
+        return user_messages[-1]  # latest user message
 
-    if user_text.lower() in PARTIAL_TRIGGERS:
-        return "List all available doctors."
-
-    if any(word in lower for word in DOCTOR_TRIGGERS):
-        return f"List doctors: {user_text}"
-
-    if "only" in lower or "just" in lower:
-        return f"Filter doctors: {user_text}"
-
-    return user_text
-
+    return None
 
 def _sanitize_rag_response(rag_response: str) -> str:
     lines = [l.strip() for l in rag_response.splitlines() if l.strip()]
