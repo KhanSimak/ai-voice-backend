@@ -92,7 +92,7 @@ def chat_api(user_message: str):
     return {"response": "I couldn't find that information."}
 
 
-# ---------------- CHAT ENDPOINT ---------------- #
+# ---------------- CHAT ENDPOINT ---------------##
 @app.post("/chat")
 async def chat(request: Request):
     # ---- SAFE JSON PARSE (VERY IMPORTANT) ----
