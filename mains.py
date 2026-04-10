@@ -138,8 +138,8 @@ async def chat(request: Request, db: Session = Depends(get_db)):
         message_data = data.get("message", {})
 
         # Extract messages
-        messages = message_data.get("artifact", {}).get("messages", [])
-        last_user_message = None
+        messages = data.get("message", {}).get("artifact", {}).get("messagesOpenAIFormatted", [])
+        last_user_message = msg.get("content")
 
         if messages:
             for msg in reversed(messages):
@@ -179,6 +179,15 @@ async def chat(request: Request, db: Session = Depends(get_db)):
             ai_reply = generate_followup_ai(last_user_message)
 
         append_message(call_id, "assistant", ai_reply)
+        
+        if "doctor" in last_user_message:
+           ai_reply = get_doctors_from_db(db)
+        else:
+          ai_reply = ask_question_for_voice(
+          app.state.vectorstore,
+          app.state.llm,
+          last_user_message
+        ) 
 
         print("🤖 AI:", ai_reply)
 
@@ -187,6 +196,32 @@ async def chat(request: Request, db: Session = Depends(get_db)):
     except Exception as e:
         print("❌ ERROR:", str(e))
         return JSONResponse({"response": "Something went wrong"})
+    
+
+def get_doctors_from_db(db):
+    doctors = db.query(Doctor).all()
+    return "\n".join([f"{d.name} - {d.specialization}" for d in doctors])
+
+def clean_user_input(text: str) -> str:
+    text = text.lower().strip()
+
+    # fix common speech mistakes
+    replacements = {
+        "team doctors": "doctors",
+        "doctor name": "doctors",
+        "name doctor": "doctors",
+        "available doctor": "doctors",
+        "octavoids": "orthopedics",
+        "steelock": "doctor",
+    }
+
+    for k, v in replacements.items():
+        if k in text:
+            return v
+
+    return text
+
+
 # ---------------- RETELL WEBHOOK ---------------- #
 @app.post("/retell-webhook")
 async def retell_webhook(request: Request, db: Session = Depends(get_db)):
