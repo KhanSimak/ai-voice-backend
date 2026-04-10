@@ -143,14 +143,19 @@ async def chat(request: Request):
 
     print("USER:", user_msg)
 
-    if "doctor" in user_msg.lower():
-        msg = "Dr Ayesha Qureshi, Dr Sameer Kulkarni, Dr Pooja Nair are available."
+    # SIMPLE RESPONSE TEST
+    if user_msg:
+        msg = f"You said: {user_msg}"
     else:
-        msg = "I can help you with doctors and clinic information."
+        msg = "I didn't hear you properly."
 
-    return {"message": "BACKEND WORKING"}
-
-
+    # 🔥 IMPORTANT: VAPI SAFE FORMAT
+    return {
+        "message": {
+            "role": "assistant",
+            "content": msg
+        }
+    }
 
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
