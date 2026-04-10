@@ -130,38 +130,46 @@ User:
 
 # ---------------- CHAT ---------------#
 
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+
+app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 @app.post("/chat")
 async def chat(request: Request):
-    data = await request.json()
+    try:
+        body = await request.body()
 
-    messages = (
-        data.get("message", {})
-        .get("artifact", {})
-        .get("messagesOpenAIFormatted", [])
-    )
+        # If empty request
+        if not body:
+            return {"reply": "No input received"}
 
-    user_msg = ""
-    for m in reversed(messages):
-        if m.get("role") == "user":
-            user_msg = m.get("content", "")
-            break
+        text = body.decode("utf-8")
 
-    print("USER:", user_msg)
+        # Try JSON parsing safely
+        try:
+            data = await request.json()
+            user_message = data.get("message", "")
+        except:
+            user_message = text  # fallback raw text
 
-    if "doctor" in user_msg.lower():
-        msg = "We have Dr Ayesha, Dr Sameer, and Dr Pooja available."
-    elif "clinic" in user_msg.lower():
-        msg = "Our clinic is City Care Clinic in Mumbai."
-    else:
-        msg = user_msg
+    except Exception as e:
+        return {"reply": f"Error: {str(e)}"}
 
-    # 🔥 IMPORTANT (OpenAI mode expects this)
+    print("USER:", user_message)
+
     return {
-        "message": {
-            "role": "assistant",
-            "content": msg
-        }
+        "reply": f"You said: {user_message}"
     }
+
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
     return "\n".join([f"{d.name} - {d.specialization}" for d in doctors])
