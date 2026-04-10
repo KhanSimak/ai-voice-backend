@@ -147,6 +147,7 @@ app.add_middleware(
 app = FastAPI()
 
 # -------- REQUEST MODEL (VAPI SAFE) --------
+
 class ChatRequest(BaseModel):
     message: Optional[str] = None
     input: Optional[str] = None
@@ -154,44 +155,28 @@ class ChatRequest(BaseModel):
     data: Optional[Any] = None
 
 
-# -------- MAIN CHAT ENDPOINT --------
 @app.post("/chat")
 async def chat(payload: ChatRequest):
-    try:
-        # 1. Extract message safely from ALL possible sources
+    # extract safely
+    user_message = (
+        payload.message
+        or payload.input
+        or payload.text
+    )
+
+    if not user_message and isinstance(payload.data, dict):
         user_message = (
-            payload.message
-            or payload.input
-            or payload.text
+            payload.data.get("message")
+            or payload.data.get("input")
+            or payload.data.get("text")
         )
 
-        # Handle nested Make.com / VAPI structures
-        if not user_message and isinstance(payload.data, dict):
-            user_message = (
-                payload.data.get("message")
-                or payload.data.get("input")
-                or payload.data.get("text")
-            )
+    if not user_message:
+        return {"message": "No input received"}
 
-        # 2. Safety check (NO EMPTY INPUT CRASHES)
-        if not user_message:
-            return {
-                "message": "No input received"
-            }
-
-        # 3. YOUR LOGIC GOES HERE (DB / AI / rules)
-        response = f"Backend working: {user_message}"
-
-        # 4. ALWAYS return VAPI-compatible format
-        return {
-            "message": response
-        }
-
-    except Exception as e:
-        # NEVER crash endpoint (prevents VAPI retry loops)
-        return {
-            "message": f"Server error handled safely: {str(e)}"
-        }    
+    return {
+        "message": f"Backend working: {user_message}"
+    }
 
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
