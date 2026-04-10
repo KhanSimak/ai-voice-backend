@@ -129,16 +129,39 @@ User:
         return None
 
 # ---------------- CHAT ---------------#
+
 @app.post("/chat")
 async def chat(request: Request):
     data = await request.json()
 
-    print("RAW:", data)
+    messages = (
+        data.get("message", {})
+        .get("artifact", {})
+        .get("messagesOpenAIFormatted", [])
+    )
 
+    user_msg = ""
+    for m in reversed(messages):
+        if m.get("role") == "user":
+            user_msg = m.get("content", "")
+            break
+
+    print("USER:", user_msg)
+
+    if "doctor" in user_msg.lower():
+        msg = "We have Dr Ayesha, Dr Sameer, and Dr Pooja available."
+    elif "clinic" in user_msg.lower():
+        msg = "Our clinic is City Care Clinic in Mumbai."
+    else:
+        msg = user_msg
+
+    # 🔥 IMPORTANT (OpenAI mode expects this)
     return {
-        "result": "BACKEND IS WORKING"
+        "message": {
+            "role": "assistant",
+            "content": msg
+        }
     }
-
 def get_doctors_from_db(db):
     doctors = db.query(Doctor).all()
     return "\n".join([f"{d.name} - {d.specialization}" for d in doctors])
