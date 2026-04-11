@@ -50,9 +50,14 @@ def create_vectorstore():
     embeddings = GoogleGenerativeAIEmbeddings(
       model="models/gemini-embedding-001",
       google_api_key=google_api_key
-)
+    )
 
-    google_api_key=os.getenv("GOOGLE_API_KEY")
+    return FAISS.load_local(
+        "faiss_index",
+        embeddings,
+        allow_dangerous_deserialization=True
+    )
+
 
 
     logger.info("Building FAISS vectorstore...")

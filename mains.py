@@ -20,46 +20,49 @@ vectorstore = load_vectorstore()
 llm = get_llm()
 
 
+
+async def safe_get_body(request: Request):
+    try:
+        return await request.json()
+    except Exception:
+        raw = await request.body()
+        if not raw:
+            return {}
+
+        try:
+            return json.loads(raw.decode("utf-8"))
+        except Exception:
+            return {}
+
 # -----------------------------
 # CHAT ENDPOINT
 # -----------------------------
 @app.post("/chat")
 async def chat(request: Request):
     try:
-        body = await request.json()
-    except Exception:
-        body = {}
+        body = await safe_get_body(request)
 
-    logger.info(f"📩 RAW BODY: {body}")
+        logger.info(f"📩 RAW BODY: {body}")
 
-    # 🔥 SAFE EXTRACTION
-    user_message = ""
-
-    if isinstance(body, dict):
         user_message = body.get("message", "")
 
-        # fallback for retell transcript
-        if not user_message and "call" in body:
-            try:
-                user_message = body["call"].get("transcript", "")
-            except:
-                user_message = ""
+        if not user_message:
+            user_message = body.get("call", {}).get("transcript", "")
 
-    user_message = user_message.strip()
+        if not user_message:
+            return {"message": "No input received"}
 
-    logger.info(f"👤 USER: {user_message}")
+        logger.info(f"👤 USER: {user_message}")
 
-    if not user_message:
-        return JSONResponse(
-            content={"message": "Empty request received"},
-            status_code=200
-        )
+        answer = ask_question(vectorstore, llm, user_message)
 
-    answer = ask_question(vectorstore, llm, user_message)
+        logger.info(f"🤖 AI: {answer}")
 
-    logger.info(f"🤖 AI: {answer}")
+        return {"message": answer}
 
-    return {"message": answer}
+    except Exception as e:
+        logger.error(f"❌ CHAT ERROR: {str(e)}")
+        return {"message": "Internal error"}
 # -----------------------------
 # HEALTH CHECK
 # -----------------------------
