@@ -2,7 +2,7 @@ import logging
 import json
 from fastapi import FastAPI, Request
 
-from rag import load_vectorstore, get_llm, ask_question
+from rag import load_vectorstore, get_llm, ask_question, should_use_rag
 
 logging.basicConfig(
     level=logging.INFO,
@@ -11,26 +11,26 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Retell AI Voice Agent")
+app = FastAPI(title="Voice AI RAG System")
 
 
-# -----------------------------
-# SAFE GLOBAL INIT
-# -----------------------------
+# ----------------------------
+# SAFE INIT
+# ----------------------------
 try:
     vectorstore = load_vectorstore()
     llm = get_llm()
-    logger.info("✅ RAG system loaded successfully")
+    logger.info("✅ RAG Loaded")
 except Exception as e:
-    logger.error(f"❌ Startup failed: {e}")
+    logger.error(f"❌ INIT FAILED: {e}")
     vectorstore = None
     llm = None
 
 
-# -----------------------------
-# SAFE JSON PARSER
-# -----------------------------
-async def safe_get_body(request: Request):
+# ----------------------------
+# SAFE BODY PARSER
+# ----------------------------
+async def safe_body(request: Request):
     try:
         return await request.json()
     except Exception:
@@ -43,10 +43,10 @@ async def safe_get_body(request: Request):
             return {}
 
 
-# -----------------------------
-# CLEAN RETELL TRANSCRIPT
-# -----------------------------
-def extract_user_text(body: dict) -> str:
+# ----------------------------
+# EXTRACT RETELL TEXT
+# ----------------------------
+def extract_text(body: dict) -> str:
     text = ""
 
     if "message" in body:
@@ -55,58 +55,54 @@ def extract_user_text(body: dict) -> str:
     elif "call" in body:
         text = body["call"].get("transcript", "")
 
-    if not text:
-        return ""
-
-    # remove noise
-    text = text.replace("User:", "")
-    text = text.replace("Agent:", "")
-    text = text.strip()
-
-    if len(text) < 2:
-        return ""
+    text = text.replace("User:", "").replace("Agent:", "").strip()
 
     return text
 
 
-# -----------------------------
+# ----------------------------
 # CHAT ENDPOINT
-# -----------------------------
+# ----------------------------
 @app.post("/chat")
 async def chat(request: Request):
     try:
         if not vectorstore or not llm:
             return {"message": "System not ready"}
 
-        body = await safe_get_body(request)
+        body = await safe_body(request)
 
-        logger.info(f"📩 RAW BODY: {body}")
+        logger.info(f"📩 BODY: {body}")
 
-        user_message = extract_user_text(body)
+        user_text = extract_text(body)
 
-        if not user_message:
-            return {"message": "No valid input received"}
+        if not user_text:
+            return {"message": "No input"}
 
-        logger.info(f"👤 CLEAN USER: {user_message}")
+        logger.info(f"👤 USER: {user_text}")
 
-        answer = ask_question(vectorstore, llm, user_message)
+        # 🔥 IMPORTANT: SKIP RAG FOR SMALL TALK
+        if not should_use_rag(user_text):
+            logger.info("🚫 Skipping RAG")
+            return {"message": "Hi! I can help you with doctors or appointments."}
+
+        answer = ask_question(vectorstore, llm, user_text)
 
         logger.info(f"🤖 AI: {answer}")
 
         return {"message": answer}
 
     except Exception as e:
-        logger.error(f"❌ CHAT ERROR: {str(e)}")
-        return {"message": "Internal server error"}
+        logger.error(f"❌ CHAT ERROR: {e}")
+        return {"message": "Internal error"}
 
 
-# -----------------------------
-# HEALTH CHECK
-# -----------------------------
+# ----------------------------
+# HEALTH
+# ----------------------------
 @app.get("/health")
 async def health():
     return {
         "status": "ok",
-        "rag_ready": vectorstore is not None,
-        "llm_ready": llm is not None
+        "rag": vectorstore is not None,
+        "llm": llm is not None
     }
