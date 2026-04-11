@@ -144,3 +144,14 @@ CONTEXT:
 
     # 🏷️ Optional debug tag (remove later if needed)
     return f"[RAG] {answer}"
+def load_vectorstore():
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-001",
+        google_api_key=os.getenv("GOOGLE_API_KEY")
+    )
+
+    return FAISS.load_local(
+        "faiss_index",
+        embeddings,
+        allow_dangerous_deserialization=True
+    )

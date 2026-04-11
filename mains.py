@@ -2,10 +2,7 @@ import logging
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
-from rag import create_vectorstore, get_llm, ask_question
-
-vectorstore = create_vectorstore()   # 🔥 ONLY ON START
-llm = get_llm()
+from rag import load_vectorstore, get_llm, ask_question
 
 logging.basicConfig(
     level=logging.INFO,
@@ -16,109 +13,56 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Retell AI Voice Agent")
 
 
-# ---------------------------------------------------------------------------
-# Replace with your real RAG
-# ---------------------------------------------------------------------------
-def rag_query(query: str) -> str:
-    return """Dr. Sharma - Cardiologist
-    Dr. Khan - Dentist
-    Dr. Patel - General Physician"""
+# -----------------------------
+# GLOBAL INIT (ONLY ONCE)
+# -----------------------------
+vectorstore = load_vectorstore()
+llm = get_llm()
 
 
-# ---------------------------------------------------------------------------
-# Constants
-# ---------------------------------------------------------------------------
-DOCTOR_TRIGGERS = {"doctor", "doctors", "physician", "specialist"}
-PARTIAL_TRIGGERS = {"name", "data", "list", "show", "give"}
-
-FALLBACK_EMPTY = "Sorry, I didn't catch that. Can you repeat?"
-FALLBACK_NO_DATA = "No doctors found right now."
-
-
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-def _extract_message(body: dict) -> str | None:
-    # Normal case
-    if "message" in body:
-        return body["message"]
-
-    # Retell case
-    if "call" in body and "transcript" in body["call"]:
-        transcript = body["call"]["transcript"]
-
-        # get last user line
-        lines = transcript.split("\n")
-        for line in reversed(lines):
-            if line.lower().startswith("user:"):
-                return line.replace("User:", "").strip()
-
-    return None
-
-def _sanitize_rag_response(rag_response: str) -> str:
-    lines = [l.strip() for l in rag_response.splitlines() if l.strip()]
-    if not lines:
-        return FALLBACK_NO_DATA
-    return ", ".join(lines[:2])
-
-
-def _build_rag_prompt(user_text: str) -> str:
-    lower = user_text.lower()
-
-    if user_text.lower() in {"name", "data", "list", "show", "give"}:
-        return "List all available doctors."
-
-    if "doctor" in lower:
-        return f"List doctors: {user_text}"
-
-    if "only" in lower or "just" in lower:
-        return f"Filter doctors: {user_text}"
-
-    return user_text
-
-# ---------------------------------------------------------------------------
-# Endpoint
-# ---------------------------------------------------------------------------
-@app.on_event("startup")
-async def startup_event():
-    global vectorstore, llm
-    logger.info("🔄 Loading RAG system...")
-
-    vectorstore = create_vectorstore()
-    llm = get_llm()
-
-    logger.info("✅ RAG Ready")
-
-
-# ✅ CHAT ENDPOINT
+# -----------------------------
+# CHAT ENDPOINT
+# -----------------------------
 @app.post("/chat")
 async def chat(request: Request):
     try:
         body = await request.json()
-        logger.info(f"📩 FULL BODY: {body}")
+    except Exception:
+        body = {}
 
-        user_message = body.get("message", "").strip()
+    logger.info(f"📩 RAW BODY: {body}")
 
-        if not user_message:
-            user_message = body.get("transcript", "")
+    # 🔥 SAFE EXTRACTION
+    user_message = ""
 
-        logger.info(f"👤 USER: {user_message}")
+    if isinstance(body, dict):
+        user_message = body.get("message", "")
 
-        if not user_message:
-            return {"message": "Please say something."}
+        # fallback for retell transcript
+        if not user_message and "call" in body:
+            try:
+                user_message = body["call"].get("transcript", "")
+            except:
+                user_message = ""
 
-        answer = ask_question(vectorstore, llm, user_message)
+    user_message = user_message.strip()
 
-        logger.info(f"🤖 AI: {answer}")
+    logger.info(f"👤 USER: {user_message}")
 
-        return {"message": answer}
+    if not user_message:
+        return JSONResponse(
+            content={"message": "Empty request received"},
+            status_code=200
+        )
 
-    except Exception as e:
-        logger.error(f"❌ ERROR: {str(e)}")
-        return {"message": "Error occurred"}
-# ---------------------------------------------------------------------------
-# Health
-# ---------------------------------------------------------------------------
+    answer = ask_question(vectorstore, llm, user_message)
+
+    logger.info(f"🤖 AI: {answer}")
+
+    return {"message": answer}
+# -----------------------------
+# HEALTH CHECK
+# -----------------------------
 @app.get("/health")
 async def health():
     return {"status": "ok"}
