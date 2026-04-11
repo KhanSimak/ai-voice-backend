@@ -37,8 +37,8 @@ def create_vectorstore():
     logger.info(f"Loaded {len(documents)} pages.")
 
     splitter = RecursiveCharacterTextSplitter(
-        chunk_size=1000,
-        chunk_overlap=150,
+        chunk_size=500,
+        chunk_overlap=50,
         separators=["\n\n", "\n", ".", " ", ""],
     )
     chunks = splitter.split_documents(documents)
