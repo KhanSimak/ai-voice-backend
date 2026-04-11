@@ -1,6 +1,5 @@
 import os
 import logging
-import google.generativeai as genai
 
 from langchain_community.document_loaders import PyPDFLoader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
@@ -8,48 +7,29 @@ from langchain_community.vectorstores import FAISS
 from langchain_google_genai import GoogleGenerativeAIEmbeddings
 from langchain_groq import ChatGroq
 from langchain.schema import HumanMessage, SystemMessage
+
 logger = logging.getLogger(__name__)
 
-from groq import Groq
-import os
+# ----------------------------
+# ENV SAFE LOADING
+# ----------------------------
+GOOGLE_API_KEY = str(os.getenv("GOOGLE_API_KEY", "")).strip()
+GROQ_API_KEY = str(os.getenv("GROQ_API_KEY", "")).strip()
+
+if not GOOGLE_API_KEY:
+    raise ValueError("GOOGLE_API_KEY is missing")
+
+if not GROQ_API_KEY:
+    raise ValueError("GROQ_API_KEY is missing")
 
 
-def create_vectorstore():
-    """
-    Loads PDF, splits into chunks, embeds with Google Generative AI,
-    and returns a FAISS vectorstore. Called once at startup only.
-    """
-    google_api_key = str(os.environ.get("GOOGLE_API_KEY"))
-    if not google_api_key:
-        raise ValueError("GOOGLE_API_KEY environment variable is not set.")
-    
-
-    pdf_path = os.path.join(os.path.dirname(__file__), "Clinic_Base.pdf")
-    if not os.path.exists(pdf_path):
-        raise FileNotFoundError(f"PDF not found at: {pdf_path}")
-
-    logger.info(f"Loading PDF: {pdf_path}")
-    loader = PyPDFLoader(pdf_path)
-    documents = loader.load()
-
-    if not documents:
-        raise ValueError("PDF loaded but contains no pages.")
-    logger.info(f"Loaded {len(documents)} pages.")
-
-    splitter = RecursiveCharacterTextSplitter(
-        chunk_size=500,
-        chunk_overlap=50,
-        separators=["\n\n", "\n", ".", " ", ""],
-    )
-    chunks = splitter.split_documents(documents)
-
-    if not chunks:
-        raise ValueError("Text splitting produced no chunks.")
-    logger.info(f"Created {len(chunks)} chunks.")
-    
+# ----------------------------
+# LOAD VECTORSTORE (FAST)
+# ----------------------------
+def load_vectorstore():
     embeddings = GoogleGenerativeAIEmbeddings(
-      model="models/gemini-embedding-001",
-      google_api_key=google_api_key
+        model="models/gemini-embedding-001",
+        google_api_key=GOOGLE_API_KEY
     )
 
     return FAISS.load_local(
@@ -59,104 +39,108 @@ def create_vectorstore():
     )
 
 
+# ----------------------------
+# CREATE VECTORSTORE (RUN ONCE ONLY - OFFLINE)
+# ----------------------------
+def create_vectorstore():
+    pdf_path = os.path.join(os.path.dirname(__file__), "Clinic_Base.pdf")
 
-    logger.info("Building FAISS vectorstore...")
+    if not os.path.exists(pdf_path):
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
+    logger.info("📄 Loading PDF...")
+    loader = PyPDFLoader(pdf_path)
+    documents = loader.load()
+
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50
+    )
+
+    chunks = splitter.split_documents(documents)
+
+    logger.info(f"📦 Chunks created: {len(chunks)}")
+
+    embeddings = GoogleGenerativeAIEmbeddings(
+        model="models/gemini-embedding-001",
+        google_api_key=GOOGLE_API_KEY
+    )
+
+    logger.info("⚡ Creating FAISS index...")
+
     vectorstore = FAISS.from_documents(chunks, embeddings)
-    logger.info("FAISS vectorstore ready.")
+
+    # SAVE LOCALLY
+    vectorstore.save_local("faiss_index")
+
+    logger.info("✅ FAISS saved locally")
 
     return vectorstore
 
 
+# ----------------------------
+# LLM
+# ----------------------------
 def get_llm():
-    groq_api_key = os.getenv("GROQ_API_KEY")
-
-    if not groq_api_key:
-        raise ValueError("GROQ_API_KEY is missing")
-
     return ChatGroq(
-        api_key=groq_api_key.strip(),
+        api_key=GROQ_API_KEY,
         model="meta-llama/llama-4-scout-17b-16e-instruct",
         temperature=0.2,
         max_tokens=1024,
     )
 
 
+# ----------------------------
+# CLEAN QUERY (IMPORTANT)
+# ----------------------------
+def clean_query(text: str) -> str:
+    if not text:
+        return ""
 
+    text = text.replace("User:", "").replace("Agent:", "").strip()
+
+    if len(text) < 2:
+        return ""
+
+    return text
+
+
+# ----------------------------
+# RAG FUNCTION (SAFE)
+# ----------------------------
 def ask_question(vectorstore, llm, question: str) -> str:
-    """
-    Retrieves relevant chunks from the vectorstore and sends them
-    along with the question to the LLM.
-    """
-
-    if not question or not question.strip():
-        return "Please say something."
-
-    question = question.strip()
-
-    logger.info(f"🧠 RAG QUERY: {question}")
-
-    # 🔍 Step 1: Retrieve docs
     try:
-        docs = vectorstore.similarity_search(question, k=4)
-    except Exception as e:
-        logger.error(f"❌ Vector search failed: {str(e)}")
-        return "I'm having trouble accessing the knowledge base."
+        question = clean_query(question)
 
-    logger.info(f"🔍 Retrieved {len(docs)} docs")
+        if not question:
+            return "Please ask something valid."
 
-    if not docs:
-        logger.warning("⚠️ No docs found in RAG")
-        return "I don't have that information in the knowledge base."
+        logger.info(f"🧠 RAG QUERY: {question}")
 
-    # 📄 Step 2: Log chunks (important for debugging)
-    for i, doc in enumerate(docs):
-        preview = doc.page_content.strip().replace("\n", " ")[:200]
-        logger.info(f"📄 Doc {i+1}: {preview}")
+        docs = vectorstore.similarity_search(question, k=3)
 
-    # 🧾 Step 3: Build context
-    context = "\n\n".join(
-        f"{doc.page_content.strip()}" for doc in docs
-    )
+        if not docs:
+            return "I don't have that information."
 
-    # 🧠 Step 4: Strong prompt (no hallucination)
-    system_prompt = f"""
-You are a clinic receptionist speaking on a phone call.
+        context = "\n\n".join([d.page_content for d in docs])
+
+        response = llm.invoke([
+            SystemMessage(content=f"""
+You are a clinic receptionist.
 
 Rules:
-- Speak naturally and politely
-- Keep answers short (1–2 sentences)
-- ONLY use the information from the context below
-- If not found, say: "I don't have that information in the knowledge base"
+- Be short and natural
+- Only use context
+- If missing say: I don't have that information
 
-CONTEXT:
+Context:
 {context}
-"""
-
-    # 💬 Step 5: LLM call
-    try:
-        response = llm.invoke([
-            SystemMessage(content=system_prompt),
+"""),
             HumanMessage(content=question)
         ])
+
+        return response.content.strip()
+
     except Exception as e:
-        logger.error(f"❌ LLM failed: {str(e)}")
-        return "I'm having trouble answering right now."
-
-    # 🧾 Step 6: Extract response
-    answer = response.content.strip() if hasattr(response, "content") else str(response).strip()
-
-    logger.info(f"🤖 FINAL ANSWER: {answer}")
-
-    # 🏷️ Optional debug tag (remove later if needed)
-    return f"[RAG] {answer}"
-def load_vectorstore():
-    embeddings = GoogleGenerativeAIEmbeddings(
-        model="models/gemini-embedding-001",
-        google_api_key=os.getenv("GOOGLE_API_KEY")
-    )
-
-    return FAISS.load_local(
-        "faiss_index",
-        embeddings,
-        allow_dangerous_deserialization=True
-    )
+        logger.error(f"RAG ERROR: {e}")
+        return "System temporarily unavailable."
